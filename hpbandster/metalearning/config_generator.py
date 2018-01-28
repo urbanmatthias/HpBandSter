@@ -12,7 +12,8 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         self.warmstarted_model.clean()
         self.bigger_budget_is_better = True
         self.config_to_loss = dict()
-        self.num_nonzero_weight = 15
+        self.num_nonzero_weight = False
+        # self.num_nonzero_weight = 15
 
     def new_result(self, job, *args, **kwargs):
         previous_max_budget = max(self.configs.keys()) if self.configs else 0
