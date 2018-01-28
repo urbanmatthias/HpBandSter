@@ -27,8 +27,6 @@ class MetaLearningBOHBConfigGenerator(BOHB):
             n_good= (self.top_n_percent * train_configs.shape[0]) // 100
             n_bad = ((100-self.top_n_percent)*train_configs.shape[0]) // 100
 
-            print(n_good, n_bad)
-
             idx = np.argsort(train_losses)
 
             train_data_good = self.impute_conditional_data(train_configs[idx[:n_good]])
@@ -46,7 +44,6 @@ class MetaLearningBOHBConfigGenerator(BOHB):
                 weights[i] += budget * sum_of_likelihood
         if np.sum(weights) == 0:
             weights = np.ones(len(kdes_good))
-        print(weights)
         self.warmstarted_model.update_weights(weights)
     
     def get_config(self, *args, **kwargs):

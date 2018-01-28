@@ -18,9 +18,6 @@ class InitialDesign():
     def set_config_space(self, config_space):
         self.config_space = config_space
     
-    def current_origin(self):
-        return self.origins[self.pointer]
-    
     def __len__(self):
         return len(self.configs)
     
@@ -35,8 +32,9 @@ class InitialDesign():
             result = make_config_compatible(self.configs[self.pointer].get_dictionary(), self.config_space)
         else:
             result = self.configs[self.pointer]
+        origin = self.origins[self.pointer]
         self.pointer += 1
-        return result
+        return result, origin
 
 
 class InitialDesignLearner():

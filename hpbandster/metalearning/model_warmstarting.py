@@ -1,3 +1,4 @@
+import sys
 import numpy as np
 from hpbandster.metalearning.util import make_vector_compatible, make_bw_compatible
 from collections import namedtuple
@@ -17,6 +18,8 @@ class WarmstartedModel():
         self.current_bad_kdes = list()
         self.current_origins = list()
         self.weights = np.array([1] * len(good_kdes))
+        self.weight_history = dict()
+        self.weight_history["SUM_OF_WEIGHTS"] = list()
     
     def get_good_kdes(self):
         return self.good_kdes + self.current_good_kdes
@@ -32,8 +35,23 @@ class WarmstartedModel():
     
     def update_weights(self, weights):
         assert np.all(weights >= 0)
-        print("\n".join(map(str, zip(self.get_origins(), self.weights))))
+
+        self.weight_history["SUM_OF_WEIGHTS"].append(np.sum(weights))
+        for i, origin in enumerate(self.get_origins()):
+            if origin not in self.weight_history:
+                self.weight_history[origin] = list()
+            self.weight_history[origin].append(weights[i])
         self.weights = weights
+    
+    def print_weight_history(self, file=sys.stdout):
+        history_of_sum = np.array(self.weight_history["SUM_OF_WEIGHTS"])
+        print("History of sum of weights:", ", ".join(map(str,self.weight_history["SUM_OF_WEIGHTS"])), file=file)
+        print("Normalized weight history:", file=file)
+        for origin, history in self.weight_history.items():
+            if origin == "SUM_OF_WEIGHTS":
+                continue
+            history = np.array(history) / history_of_sum
+            print(origin, ":", ", ".join(map(str, history)), file=file)
     
     def set_current_config_space(self, current_config_space):
         self.current_config_space = current_config_space
@@ -41,7 +59,7 @@ class WarmstartedModel():
     def set_current_kdes(self, kdes):
         self.current_good_kdes.extend([kde["good"] for budget, kde in sorted(kdes.items())])
         self.current_bad_kdes.extend([kde["bad"] for budget, kde in sorted(kdes.items())])
-        self.current_origins.append(["current:" + str(b) for b in sorted(kdes.keys())])
+        self.current_origins.extend(["current:" + str(b) for b in sorted(kdes.keys())])
     
     def pdf(self, kdes, vector):
         pdf_values = np.zeros(len(kdes))
