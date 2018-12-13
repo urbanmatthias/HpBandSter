@@ -1,8 +1,10 @@
 import numpy as np
-from hpbandster.metalearning.util import make_config_compatible
+from hpbandster.metalearning.util import make_config_compatible, fix_boolean_config
+from hpbandster.optimizers.config_generators.bohb import BOHB as BohbConfigGenerator
 from hpbandster.core.result import logged_results_to_HBS_result
 from ConfigSpace import Configuration
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.impute import SimpleImputer
 from sklearn.base import clone
 
 
@@ -42,17 +44,14 @@ class Hydra(InitialDesignLearner):
         self.config_spaces = list()
         self.incumbents = None
         self.models = None
-        self.model = model or RandomForestRegressor()
+        self.model = model or RandomForestRegressor(n_estimators=100)
         self.cost_calculation = cost_calculation or np.argsort
 
     def add_result(self, result, config_space):
-        if isinstance(result, str):
-            result = logged_results_to_HBS_result(result)
         self.results.append(result)
         self.config_spaces.append(config_space)
 
     def learn(self, num_configs=None):
-        self._train_models()
         cost_matrix = self._get_cost_matrix()
 
         initial_design = []
@@ -60,7 +59,7 @@ class Hydra(InitialDesignLearner):
         for _ in range(num_configs):
             print("Initial Design", initial_design)
             new_incumbent = self._greedy_step(initial_design, cost_matrix)
-            initial_design += new_incumbent
+            initial_design.append(new_incumbent)
         initial_design_configs = [self.incumbents[i] for i in initial_design]
         return InitialDesign(initial_design_configs)
 
@@ -73,42 +72,52 @@ class Hydra(InitialDesignLearner):
 
     def _get_cost_matrix(self):
         self._get_incumbents()
-        ranks = []
-        for model, config_space in zip(self.models, self.config_spaces):
+        ranks = list()
+        for i, (result, config_space) in enumerate(zip(self.results, self.config_spaces)):
+            print(i)
+            if isinstance(result, str):
+                result = logged_results_to_HBS_result(result)
+            try:
+                model, imputer = self._train_single_model(result, config_space)
+            except:
+                print("No model trained")
+                continue
             X = np.vstack([make_config_compatible(i, config_space).get_array() for i in self.incumbents])
-            predicted_losses = model.predict(X)
-            ranks.append(self.cost_calculation(predicted_losses))
-        ranks = np.hstack(ranks)  # incumbents x models
+            predicted_losses = model.predict(imputer(X))
+            ranks.append(self.cost_calculation(predicted_losses).reshape((-1, 1)))
+        ranks = np.hstack(ranks)  # incumbents x estimated performances
         return ranks
 
     def _get_incumbents(self):
         self.incumbents = list()
         for result, config_space in zip(self.results, self.config_spaces):
+            if isinstance(result, str):
+                result = logged_results_to_HBS_result(result)
             id2config = result.get_id2config_mapping()
-            trajectory = result.get_incumbent_trajectory(bigger_is_better=False, non_decreasing_budget=False)
-            incumbent = id2config[trajectory["config_ids"][-1]]
-            self.incumbents.append(Configuration(config_space, incumbent))
-
-    def _train_models(self):
-        self.models = list()
-        for i, (result, config_space) in enumerate(zip(self.results, self.config_spaces)):
-            print("Training model", i)
-            model = self._train_single_model(result, config_space)
-            self.models.append(model)
+            try:
+                trajectory = result.get_incumbent_trajectory(bigger_is_better=False, non_decreasing_budget=False)
+            except:
+                print("No incumbent found!")
+                continue
+            incumbent = id2config[trajectory["config_ids"][-1]]["config"]
+            self.incumbents.append(Configuration(config_space, fix_boolean_config(incumbent)))
 
     def _train_single_model(self, result, config_space):
+        config_generator = BohbConfigGenerator(config_space)
         X, y = list(), list()
         id2config = result.get_id2config_mapping()
         for config_id, config in id2config.items():
-            print(config["config"])
-            print(config_space.sample_configuration().get_dictionary())
-            config = Configuration(config_space, {k: str(v) for k, v in config["config"].items()})
+            config = Configuration(config_space, fix_boolean_config(config["config"]))
             runs = result.get_runs_by_id(config_id)
+            runs = [r for r in runs if r.loss is not None]
+            if len(runs) == 0:
+                continue
             best_run = min(runs, key=lambda run: run.loss)
             X.append(config.get_array())
             y.append(best_run.loss)
         X = np.vstack(X)
         y = np.array(y)
+        X = config_generator.impute_conditional_data(X)
         model = clone(self.model)
         model.fit(X, y)
-        return model
+        return model, config_generator.impute_conditional_data
