@@ -7,11 +7,10 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.base import clone
 
-
 class InitialDesign():
     def __init__(self, configs):
         self.pointer = 0
-        self.configs = list()
+        self.configs = configs
         self.config_space = None
     
     def set_config_space(self, config_space):
@@ -53,13 +52,14 @@ class Hydra(InitialDesignLearner):
 
     def learn(self, num_configs=None):
         cost_matrix = self._get_cost_matrix()
+        print(cost_matrix)
 
         initial_design = []
         num_configs = num_configs or len(self.results)
         for _ in range(num_configs):
-            print("Initial Design", initial_design)
             new_incumbent = self._greedy_step(initial_design, cost_matrix)
             initial_design.append(new_incumbent)
+            print("Initial Design:", initial_design, "Cost:", self._cost(initial_design, cost_matrix))
         initial_design_configs = [self.incumbents[i] for i in initial_design]
         return InitialDesign(initial_design_configs)
 
@@ -68,7 +68,7 @@ class Hydra(InitialDesignLearner):
         return min(available_incumbents, key=lambda inc: self._cost(initial_design + [inc], cost_matrix))
 
     def _cost(self, initial_design, cost_matrix):
-        return np.mean(np.min(cost_matrix[np.array(initial_design), :], axis=1))
+        return np.mean(np.min(cost_matrix[np.array(initial_design), :], axis=0))
 
     def _get_cost_matrix(self):
         self._get_incumbents()
@@ -81,9 +81,10 @@ class Hydra(InitialDesignLearner):
                 model, imputer = self._train_single_model(result, config_space)
             except:
                 print("No model trained")
-                continue
+                raise
             X = np.vstack([make_config_compatible(i, config_space).get_array() for i in self.incumbents])
             predicted_losses = model.predict(imputer(X))
+            print(predicted_losses)
             ranks.append(self.cost_calculation(predicted_losses).reshape((-1, 1)))
         ranks = np.hstack(ranks)  # incumbents x estimated performances
         return ranks
@@ -99,6 +100,7 @@ class Hydra(InitialDesignLearner):
             except:
                 print("No incumbent found!")
                 continue
+            print("Incumbent loss:",  trajectory["losses"][-1])
             incumbent = id2config[trajectory["config_ids"][-1]]["config"]
             self.incumbents.append(Configuration(config_space, fix_boolean_config(incumbent)))
 
@@ -115,9 +117,14 @@ class Hydra(InitialDesignLearner):
             best_run = min(runs, key=lambda run: run.loss)
             X.append(config.get_array())
             y.append(best_run.loss)
-        X = np.vstack(X)
-        y = np.array(y)
+        X_list = X
+        y_list = y
+
+        X = np.vstack(X_list * 10)
+        y = np.array(y_list * 10)
         X = config_generator.impute_conditional_data(X)
         model = clone(self.model)
         model.fit(X, y)
+        print(model.score(config_generator.impute_conditional_data(np.vstack(X_list)), np.array(y_list)))
+
         return model, config_generator.impute_conditional_data

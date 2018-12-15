@@ -297,15 +297,14 @@ class BOHB(base_config_generator):
 			self.configs[budget] = []
 			self.losses[budget] = []
 
-		# skip model building if we already have a bigger model
-		if max(list(self.kde_models.keys()) + [-np.inf]) > budget:
-			return
-
 		# We want to get a numerical representation of the configuration in the original space
-
 		conf = ConfigSpace.Configuration(self.configspace, job.kwargs["config"])
 		self.configs[budget].append(conf.get_array())
 		self.losses[budget].append(loss)
+
+		# skip model building if we already have a bigger model
+		if max(list(self.kde_models.keys()) + [-np.inf]) > budget:
+			return
 
 		
 		# skip model building:

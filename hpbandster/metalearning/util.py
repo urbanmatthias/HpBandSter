@@ -17,20 +17,15 @@ def make_config_compatible(config, config_space):
             config[hp.name] = hp.sample(config_space.random)
 
     # delete values for inactive hyperparameters
-    config_tmp = dict()
-    config_obj = ConfigSpace.Configuration(config_space, config, allow_inactive_with_values=True)
-    for hp_name in config_space.get_active_hyperparameters(config_obj):
-        config_tmp[hp_name] = config[hp_name]
-    while set(config.keys()) != set(config_tmp.keys()):
-        config = config_tmp
-        config_tmp = dict()
-        config_obj = ConfigSpace.Configuration(config_space, config, allow_inactive_with_values=True)
-        for hp_name in config_space.get_active_hyperparameters(config_obj):
-            config_tmp[hp_name] = config[hp_name]
-    return ConfigSpace.Configuration(config_space, fix_boolean_config(config))
+    config = ConfigSpace.util.deactivate_inactive_hyperparameters(
+									configuration_space=config_space,
+									configuration=fix_boolean_config(config)
+									)
+    return ConfigSpace.Configuration(config_space, config)
 
 def make_vector_compatible(vector, from_searchspace, to_searchspace):
-    return vector
+    config = ConfigSpace.Configuration(configuration_space=from_searchspace, vector=vector, allow_inactive_with_values=True)
+    return make_config_compatible(config, to_searchspace).get_array()
 
 def fix_boolean_config(config):
     return {k: v if not isinstance(v, bool) else str(v) for k, v in config.items()}

@@ -30,7 +30,8 @@ class Master(object):
 			dynamic_queue_size=True,
 			logger=None,
 			result_logger=None,
-			previous_result = None,
+			previous_result=None,
+			initial_design=None
 			):
 		"""The Master class is responsible for the book keeping and to decide what to run next. Optimizers are
                 instantiations of Master, that handle the important steps of deciding what configurations to run on what
@@ -112,6 +113,9 @@ class Master(object):
 
 		else:
 			self.warmstart_iteration = [WarmStartIteration(previous_result, self.config_generator)]
+		
+		if initial_design is not None:
+			self.add_initial_design_iteration(initial_design)
 
 		# condition to synchronize the job_callback and the queue
 		self.thread_cond = threading.Condition()
@@ -308,3 +312,11 @@ class Master(object):
 
 	def __del__(self):
 		pass
+	
+	def add_initial_design_iteration(self, initial_design):
+		"""Add a iteration to run the configs of the initial design
+		
+		Arguments:
+			initial_design {InitialDesign} -- The initial design learned by metalearning
+		"""
+		raise NotImplementedError
