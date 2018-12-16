@@ -6,35 +6,48 @@ from hpbandster.optimizers.config_generators.bohb import BOHB as BohbConfigGener
 from hpbandster.core.dispatcher import Job
 
 class WarmstartedModel():
-    def __init__(self, good_kdes, bad_kdes, config_spaces):
-        assert len(good_kdes) == len(bad_kdes)
+    def __init__(self, good_kdes, bad_kdes, kde_config_spaces):
+        assert len(good_kdes) == len(bad_kdes) == len(kde_config_spaces)
         self.good_kdes = good_kdes
         self.bad_kdes = bad_kdes
-        self.config_spaces = config_spaces
+        self.kde_config_spaces = kde_config_spaces
         self.current_config_space = None
         self.current_good_kdes = list()
         self.current_bad_kdes = list()
         self.weights = np.array([1] * len(good_kdes))
     
+    def get_good_kdes(self):
+        return self.good_kdes + self.current_good_kdes
+
+    def get_bad_kdes(self):
+        return self.bad_kdes + self.current_bad_kdes
+    
+    def get_kde_configspaces(self):
+        return self.kde_config_spaces + [self.current_config_space] * len(self.current_bad_kdes)
+    
     def update_weights(self, weights):
         self.weights = weights
     
-    def set_current_kdes(self, kdes, config_space):
-        self.current_good_kdes.append([kde["good"] for budget, kde in sorted(kdes.items())])
-        self.current_bad_kdes.append([kde["bad"] for budget, kde in sorted(kdes.items())])
-        self.current_config_space = config_space
+    def set_current_config_space(self, current_config_space):
+        self.current_config_space = current_config_space
+    
+    def set_current_kdes(self, kdes):
+        self.current_good_kdes.extend([kde["good"] for budget, kde in sorted(kdes.items())])
+        self.current_bad_kdes.extend([kde["bad"] for budget, kde in sorted(kdes.items())])
     
     def pdf(self, kdes, vector):
         pdf_values = np.zeros(len(kdes))
-        for i, (kde, config_space) in enumerate(zip(kdes, self.config_spaces)):
-            pdf_values[i] = kde.pdf(make_vector_compatible(vector, self.current_config_space, config_space))
+        for i, (kde, kde_config_space) in enumerate(zip(kdes, self.get_kde_configspaces())):
+            pdf_value = kde.pdf(make_vector_compatible(vector, self.current_config_space, kde_config_space))
+            if np.isfinite(pdf_value):
+                pdf_values[i] = pdf_value
         return np.sum(pdf_values * self.weights) / np.sum(self.weights)
     
     def __getitem__(self, good_or_bad):
         good = good_or_bad == "good"
-        kdes = (self.good_kdes + self.current_good_kdes) if good else (self.bad_kdes + self.current_bad_kdes)
+        kdes = self.get_good_kdes() if good else self.get_bad_kdes()
         i = np.random.choice(len(kdes), p=self.weights/np.sum(self.weights))
-        metalearning_kde = namedtuple("metalearning kde", ["bw", "data", "pdf"])
+        metalearning_kde = namedtuple("metalearning_kde", ["bw", "data", "pdf"])
         return metalearning_kde(
             bw=kdes[i].bw,
             data=kdes[i].data,
@@ -45,6 +58,7 @@ class WarmstartedModelBuilder():
     def __init__(self):
         self.results = list()
         self.config_spaces = list()
+        self.kde_config_spaces = list()
     
     def add_result(self, result, config_space):
         self.results.append(result)
@@ -60,7 +74,8 @@ class WarmstartedModelBuilder():
             good, bad = self.train_kde(result, config_space)
             good_kdes.extend(good)
             bad_kdes.extend(bad)
-        return WarmstartedModel(good_kdes, bad_kdes, self.config_spaces)
+            self.kde_config_spaces.extend([config_space] * len(good))
+        return WarmstartedModel(good_kdes, bad_kdes, self.kde_config_spaces)
     
     def train_kde(self, result, config_space):
         cg = BohbConfigGenerator(config_space)

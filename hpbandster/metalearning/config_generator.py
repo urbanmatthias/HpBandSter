@@ -1,4 +1,5 @@
 from hpbandster.optimizers.config_generators.bohb import BOHB
+from hpbandster.metalearning.util import make_vector_compatible
 import numpy as np
 
 class MetaLearningBOHBConfigGenerator(BOHB):
@@ -8,13 +9,13 @@ class MetaLearningBOHBConfigGenerator(BOHB):
 
     def new_result(self, *args, **kwargs):
         super().new_result(*args, **kwargs)
+        self.warmstarted_model.set_current_kdes(self.kde_models)
 
-        self.warmstarted_model.set_current_kdes(self.kde_models, self.configspace)
+        kdes_good = self.warmstarted_model.get_good_kdes()
+        kdes_bad  = self.warmstarted_model.get_bad_kdes()
+        kde_configspaces = self.warmstarted_model.get_kde_configspaces()
 
-        kdes_good = self.warmstarted_model.good_kdes + self.warmstarted_model.current_good_kdes
-        kdes_bad  = self.warmstarted_model.bad_kdes  + self.warmstarted_model.current_bad_kdes
-
-        weights = np.array([0] * len(kdes_good))
+        weights = np.zeros(len(kdes_good), dtype=float)
         budgets = sorted(self.configs.keys())
         for budget in budgets:
             train_configs = np.array(self.configs[budget])
@@ -29,17 +30,24 @@ class MetaLearningBOHBConfigGenerator(BOHB):
             train_data_good = self.impute_conditional_data(train_configs[idx[:n_good]])
             train_data_bad  = self.impute_conditional_data(train_configs[idx[n_good:n_good+n_bad]])
 
-            for i, (good_kde, bad_kde) in enumerate(zip(kdes_good, kdes_bad)):
-                good_kde_likelihoods = np.maximum(good_kde.pdf(train_data_good), 1e-32)
-                bad_kde_likelihoods = np.maximum(bad_kde.pdf(train_data_bad), 1e-32)
+            for i, (good_kde, bad_kde, kde_configspace) in enumerate(zip(kdes_good, kdes_bad, kde_configspaces)):
+                train_data_good_compatible = make_vector_compatible(train_data_good, self.configspace, kde_configspace)
+                train_data_bad__compatible  = make_vector_compatible(train_data_bad,  self.configspace, kde_configspace)
+
+                good_kde_likelihoods = np.maximum(good_kde.pdf(train_data_good_compatible), 1e-32)
+                bad_kde_likelihoods = np.maximum(bad_kde.pdf(train_data_bad__compatible), 1e-32)
+
                 likelihood = np.prod(good_kde_likelihoods) * np.prod(bad_kde_likelihoods)
+                likelihood = 0 if not np.isfinite(likelihood) else likelihood
                 weights[i] += (budget * likelihood)
         self.warmstarted_model.update_weights(weights)
     
     def get_config(self, *args, **kwargs):
         budget = 0
+        self.warmstarted_model.set_current_config_space(self.configspace)
         if len(self.kde_models.keys()) > 0:
             budget = max(self.kde_models.keys())
         self.kde_models[budget + 1] = self.warmstarted_model
-        super().get_config(*args, **kwargs)
+        result = super().get_config(*args, **kwargs)
         del self.kde_models[budget + 1]
+        return result

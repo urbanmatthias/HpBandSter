@@ -1,4 +1,6 @@
 import ConfigSpace
+import numpy as np
+from hpbandster.optimizers.config_generators.bohb import BOHB as BohbConfigGenerator
 
 def make_config_compatible(config, config_space):
     if isinstance(config, dict):
@@ -23,9 +25,24 @@ def make_config_compatible(config, config_space):
 									)
     return ConfigSpace.Configuration(config_space, config)
 
-def make_vector_compatible(vector, from_searchspace, to_searchspace):
-    config = ConfigSpace.Configuration(configuration_space=from_searchspace, vector=vector, allow_inactive_with_values=True)
-    return make_config_compatible(config, to_searchspace).get_array()
+def make_vector_compatible(vector, from_configspace, to_configspace):
+    x = np.array(vector).reshape((-1, len(from_configspace.get_hyperparameters())))
+    c = np.zeros((x.shape[0], len(to_configspace.get_hyperparameters()))) * np.nan
+
+    # copy given values at correct index
+    for i in range(x.shape[1]):
+        j = transform_hyperparameter_index(i, from_configspace, to_configspace)
+        if j is not None:
+            c[:, j] = x[:, i]
+    cg = BohbConfigGenerator(to_configspace)
+    return cg.impute_conditional_data(c)
+
+def transform_hyperparameter_index(idx, from_configspace, to_configspace):
+    hp_name = from_configspace.get_hyperparameter_by_idx(idx)
+    try:
+        return to_configspace.get_idx_by_hyperparameter_name(hp_name)
+    except:
+        return None
 
 def fix_boolean_config(config):
     return {k: v if not isinstance(v, bool) else str(v) for k, v in config.items()}

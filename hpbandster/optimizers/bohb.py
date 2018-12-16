@@ -96,7 +96,6 @@ class BOHB(Master):
 					)
 
 		self.initial_design_num_max_budget = initial_design_num_max_budget
-		super().__init__(config_generator=cg, **kwargs)
 
 		# Hyperband related stuff
 		self.eta = eta
@@ -106,6 +105,8 @@ class BOHB(Master):
 		# precompute some HB stuff
 		self.max_SH_iter = -int(np.log(min_budget/max_budget)/np.log(eta)) + 1
 		self.budgets = max_budget * np.power(eta, -np.linspace(self.max_SH_iter-1, 0, self.max_SH_iter))
+
+		super().__init__(config_generator=cg, **kwargs)
 
 		self.config.update({
 						'eta'        : eta,
@@ -151,10 +152,11 @@ class BOHB(Master):
 		s = self.max_SH_iter - 1
 		eta = (len(initial_design) / num_max_budget) ** (1/s)
 		# number of configurations in that bracket
-		n0 = int(np.floor((self.max_SH_iter)/(s+1)) * eta**s)
+		n0 = len(initial_design)
 		ns = [max(int(n0*(eta**(-i))), 1) for i in range(s+1)]
-
 		iteration = SuccessiveHalving(HPB_iter=-1, num_configs=ns, budgets=self.budgets[(-s-1):], config_sampler=None, logger=self.logger, result_logger=self.result_logger)
 		for config in initial_design:
-			iteration.add_configuration(config, {"model_based_pick": "initial design"})
+			iteration.add_configuration(config.get_dictionary(), {"model_based_pick": "initial design"})
+		print(iteration.num_configs)
+		print(iteration.actual_num_configs)
 		return iteration

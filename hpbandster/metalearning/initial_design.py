@@ -16,6 +16,9 @@ class InitialDesign():
     def set_config_space(self, config_space):
         self.config_space = config_space
     
+    def __len__(self):
+        return len(self.configs)
+    
     def __iter__(self):
         self.pointer = 0
         return self
