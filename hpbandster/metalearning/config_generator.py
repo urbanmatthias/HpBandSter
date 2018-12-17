@@ -15,14 +15,16 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         kdes_bad  = self.warmstarted_model.get_bad_kdes()
         kde_configspaces = self.warmstarted_model.get_kde_configspaces()
 
-        weights = np.zeros(len(kdes_good), dtype=float)
         budgets = sorted(self.configs.keys())
+        weights = np.zeros(len(kdes_good), dtype=float)
         for budget in budgets:
             train_configs = np.array(self.configs[budget])
             train_losses =  np.array(self.losses[budget])
 
-            n_good= max(self.min_points_in_model, (self.top_n_percent * train_configs.shape[0])//100 )
-            n_bad = max(self.min_points_in_model, ((100-self.top_n_percent)*train_configs.shape[0])//100)
+            n_good= (self.top_n_percent * train_configs.shape[0]) // 100
+            n_bad = ((100-self.top_n_percent)*train_configs.shape[0]) // 100
+
+            print(n_good, n_bad)
 
             # Refit KDE for the current budget
             idx = np.argsort(train_losses)
@@ -34,12 +36,14 @@ class MetaLearningBOHBConfigGenerator(BOHB):
                 train_data_good_compatible = make_vector_compatible(train_data_good, self.configspace, kde_configspace)
                 train_data_bad__compatible  = make_vector_compatible(train_data_bad,  self.configspace, kde_configspace)
 
-                good_kde_likelihoods = np.maximum(good_kde.pdf(train_data_good_compatible), 1e-32)
-                bad_kde_likelihoods = np.maximum(bad_kde.pdf(train_data_bad__compatible), 1e-32)
+                good_kde_likelihoods = np.maximum(np.nan_to_num(good_kde.pdf(train_data_good_compatible)), 0)
+                bad_kde_likelihoods = np.maximum(np.nan_to_num(bad_kde.pdf(train_data_bad__compatible)), 0)
 
-                likelihood = np.prod(good_kde_likelihoods) * np.prod(bad_kde_likelihoods)
-                likelihood = 0 if not np.isfinite(likelihood) else likelihood
-                weights[i] += (budget * likelihood)
+                sum_of_likelihood = np.sum(good_kde_likelihoods) + np.sum(bad_kde_likelihoods)
+                weights[i] += budget * sum_of_likelihood
+        if np.sum(weights) == 0:
+            weights = np.ones(len(kdes_good))
+        print(weights)
         self.warmstarted_model.update_weights(weights)
     
     def get_config(self, *args, **kwargs):

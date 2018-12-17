@@ -24,12 +24,14 @@ class InitialDesign():
         return self
     
     def __next__(self):
-        self.pointer += 1
         if self.pointer >= len(self.configs):
             raise StopIteration
         if self.config_space:
-            return make_config_compatible(self.configs[self.pointer], self.config_space)
-        return self.configs[self.pointer]
+            result = make_config_compatible(self.configs[self.pointer].get_dictionary(), self.config_space)
+        else:
+            result = self.configs[self.pointer]
+        self.pointer += 1
+        return result
 
 
 class InitialDesignLearner():

@@ -115,7 +115,8 @@ class Master(object):
 			self.warmstart_iteration = [WarmStartIteration(previous_result, self.config_generator)]
 		
 		if initial_design is not None:
-			self.add_initial_design_iteration(initial_design)
+			initial_design.set_config_space(self.config_generator.configspace)
+			self.iterations.append(self.get_initial_design_iteration(initial_design))
 
 		# condition to synchronize the job_callback and the queue
 		self.thread_cond = threading.Condition()
@@ -313,7 +314,7 @@ class Master(object):
 	def __del__(self):
 		pass
 	
-	def add_initial_design_iteration(self, initial_design):
+	def get_initial_design_iteration(self, initial_design):
 		"""Add a iteration to run the configs of the initial design
 		
 		Arguments:

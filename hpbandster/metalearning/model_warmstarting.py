@@ -1,5 +1,5 @@
 import numpy as np
-from hpbandster.metalearning.util import make_vector_compatible, fix_boolean_config
+from hpbandster.metalearning.util import make_vector_compatible, fix_boolean_config, make_bw_compatible
 from collections import namedtuple
 from hpbandster.core.result import logged_results_to_HBS_result
 from hpbandster.optimizers.config_generators.bohb import BOHB as BohbConfigGenerator
@@ -26,6 +26,7 @@ class WarmstartedModel():
         return self.kde_config_spaces + [self.current_config_space] * len(self.current_bad_kdes)
     
     def update_weights(self, weights):
+        assert np.all(weights >= 0)
         self.weights = weights
     
     def set_current_config_space(self, current_config_space):
@@ -40,7 +41,7 @@ class WarmstartedModel():
         for i, (kde, kde_config_space) in enumerate(zip(kdes, self.get_kde_configspaces())):
             pdf_value = kde.pdf(make_vector_compatible(vector, self.current_config_space, kde_config_space))
             if np.isfinite(pdf_value):
-                pdf_values[i] = pdf_value
+                pdf_values[i] = max(0, pdf_value)
         return np.sum(pdf_values * self.weights) / np.sum(self.weights)
     
     def __getitem__(self, good_or_bad):
@@ -49,8 +50,8 @@ class WarmstartedModel():
         i = np.random.choice(len(kdes), p=self.weights/np.sum(self.weights))
         metalearning_kde = namedtuple("metalearning_kde", ["bw", "data", "pdf"])
         return metalearning_kde(
-            bw=kdes[i].bw,
-            data=kdes[i].data,
+            bw=make_bw_compatible(kdes[i].bw, self.get_kde_configspaces()[i], self.current_config_space),
+            data=make_vector_compatible(kdes[i].data, self.get_kde_configspaces()[i], self.current_config_space),
             pdf=lambda vector: self.pdf(kdes, vector)
         )
 
