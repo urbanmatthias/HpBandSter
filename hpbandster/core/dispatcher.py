@@ -22,11 +22,14 @@ class Job(object):
 	def time_it(self, which_time):
 		self.timestamps[which_time] = time.time()
 
-	def __repr__(self):
+	def __repr__(self, filter_result=True):
+		result = self.result
+		if filter_result and result is not None:
+			result = {"loss": result["loss"], "info": result["info"]}
 		return(\
 			"job_id: " +str(self.id) + "\n" + \
 			"kwargs: " + str(self.kwargs) + "\n" + \
-			"result: " + str(self.result)+ "\n" +\
+			"result: " + str(result)+ "\n" +\
 			"exception: "+ str(self.exception) + "\n"
 		)
 	def recreate_from_run(self, run):
