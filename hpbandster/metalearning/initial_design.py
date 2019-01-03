@@ -96,15 +96,15 @@ class Hydra(InitialDesignLearner):
         self.incumbents = list()
         self.budgets = list()
         for result, config_space in zip(self.results, self.config_spaces):
-            if isinstance(result, str):
-                result = logged_results_to_HBS_result(result)
-            id2config = result.get_id2config_mapping()
             try:
+                if isinstance(result, str):
+                    result = logged_results_to_HBS_result(result)
+                id2config = result.get_id2config_mapping()
                 trajectory = result.get_incumbent_trajectory(bigger_is_better=False, non_decreasing_budget=False)
             except:
                 print("No incumbent found!")
                 continue
-            print("Incumbent loss:",  trajectory["losses"][-1])
+            print("Incumbent loss:",  trajectory["losses"][-1], " budget:", trajectory["budgets"][-1])
             incumbent = id2config[trajectory["config_ids"][-1]]["config"]
             self.incumbents.append(Configuration(config_space, incumbent))
             self.budgets.append(trajectory["budgets"][-1])
