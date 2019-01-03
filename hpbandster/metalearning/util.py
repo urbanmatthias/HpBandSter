@@ -4,7 +4,7 @@ from hpbandster.optimizers.config_generators.bohb import BOHB as BohbConfigGener
 
 def make_config_compatible(config, config_space):
     if isinstance(config, dict):
-        config = fix_boolean_config(config)
+        config = config
     else:
         config = config.get_dictionary()
 
@@ -67,6 +67,3 @@ def transform_hyperparameter(from_configspace, to_configspace, from_idx, to_idx,
         if to_hp.is_legal(transformed):
             result[i] = to_hp._inverse_transform(transformed)
     return result
-
-def fix_boolean_config(config):
-    return {k: v if not isinstance(v, bool) else str(v) for k, v in config.items()}

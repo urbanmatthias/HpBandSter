@@ -1,5 +1,5 @@
 import numpy as np
-from hpbandster.metalearning.util import make_vector_compatible, fix_boolean_config, make_bw_compatible
+from hpbandster.metalearning.util import make_vector_compatible, make_bw_compatible
 from collections import namedtuple
 from hpbandster.core.result import logged_results_to_HBS_result
 from hpbandster.optimizers.config_generators.bohb import BOHB as BohbConfigGenerator
@@ -86,7 +86,7 @@ class WarmstartedModelBuilder():
         id2conf = result.get_id2config_mapping()
         for id in id2conf:
             for r in result.get_runs_by_id(id):
-                j = Job(id, config=fix_boolean_config(id2conf[id]['config']), budget=r.budget)
+                j = Job(id, config=id2conf[id]['config'], budget=r.budget)
                 if r.loss is None:
                     r.loss = float('inf')
                 if r.info is None:
