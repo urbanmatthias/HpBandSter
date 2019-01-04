@@ -1,6 +1,12 @@
 import unittest
+import os
 import ConfigSpace
+import numpy as np
 from hpbandster.metalearning.util import make_config_compatible, make_vector_compatible
+from hpbandster.metalearning.initial_design import Hydra
+from hpbandster.metalearning.model_warmstarting import WarmstartedModelBuilder, WarmstartedModel
+from hpbandster.core.result import logged_results_to_HBS_result
+from sklearn.linear_model import LinearRegression
 
 class TestMetaLearning(unittest.TestCase):
 
@@ -52,3 +58,115 @@ class TestMetaLearning(unittest.TestCase):
         self.assertTrue(compatible_config["h2"] in ["B", "C"])
         self.assertTrue("h4" in compatible_config if compatible_config["h2"] == "B" else "h5" in compatible_config)
         self.assertEqual(len(compatible_config.get_dictionary()), 3)
+    
+    def test_initial_design(self):
+        # test train cost estimation model
+        hydra = Hydra(cost_estimation_model=LinearRegression())
+        result1 = logged_results_to_HBS_result(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result1"))
+        result2 = logged_results_to_HBS_result(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result2"))
+        cs = ConfigSpace.ConfigurationSpace()
+        cs.add_hyperparameters([
+            ConfigSpace.hyperparameters.UniformFloatHyperparameter("A", lower=0, upper=10),
+            ConfigSpace.hyperparameters.UniformFloatHyperparameter("B", lower=0, upper=10)
+        ])
+        model, _ = hydra._train_cost_estimation_model(result1, cs)
+        np.testing.assert_array_almost_equal(model.coef_, np.array([0., -1]))
+        np.testing.assert_almost_equal(model.intercept_, 0.8)
+
+        # test get cost matrix column
+        hydra = Hydra(cost_estimation_model=LinearRegression())
+        class ExactCostModel():
+            def __init__(self, idx):
+                self.idx = idx
+
+            def __enter__(self):
+                return self
+            
+            def __exit__(self, error_type, error_value, error_traceback):
+                return error_type is None
+            
+            def evaluate(self, incumbent, budget):
+                return abs(8 - incumbent["B"]) if self.idx == 1 else abs(8 - (incumbent["B"] - incumbent["A"]))
+    
+        hydra.incumbents = [ConfigSpace.Configuration(cs, values={"A": 9, "B": 9}),
+                            ConfigSpace.Configuration(cs, values={"A": 0, "B": 10}),
+                            ConfigSpace.Configuration(cs, values={"A": 2, "B": 8})]
+        hydra.budgets = [0, 0, 0]
+        r = hydra._get_cost_matrix_column((0, (result1, cs, None)))
+        np.testing.assert_array_almost_equal(r, np.array([[1], [0], [2]]))
+        r = hydra._get_cost_matrix_column((0, (result1, cs, ExactCostModel(1))))
+        np.testing.assert_array_almost_equal(r, np.array([[1], [2], [0]]))
+
+        # test get_incumbents
+        hydra = Hydra(cost_estimation_model=LinearRegression())
+        hydra.results = [result1, result2]
+        hydra.config_spaces = [cs, cs]
+        hydra._get_incumbents()
+        self.assertEqual(hydra.incumbents, [ConfigSpace.Configuration(cs, values={"A": 2, "B": 8}),
+                                            ConfigSpace.Configuration(cs, values={"A": 2, "B": 10})])
+        self.assertEqual(hydra.budgets, [9.0, 9.0])
+
+        # test get_cost_matrix
+        hydra = Hydra(cost_estimation_model=LinearRegression())
+        hydra.results = [result1, result2]
+        hydra.config_spaces = [cs, cs]
+        hydra.exact_cost_models = [None, None]
+        r = hydra._get_cost_matrix()
+        np.testing.assert_array_almost_equal(r, np.array([[1, 1], [0, 0]]))
+        hydra.exact_cost_models = [ExactCostModel(1), ExactCostModel(2)]
+        r = hydra._get_cost_matrix()
+        np.testing.assert_array_almost_equal(r, np.array([[0, 1], [1, 0]]))
+
+        # test hydra alg
+        hydra = Hydra(cost_estimation_model=LinearRegression())
+        hydra.incumbents = [0, 1, 2, 3]
+        cost_matrix = np.array([[0.1, 0.8, 0.7, 0.6],
+                                [0.4, 0.0, 0.7, 0.5],
+                                [0.9, 0.3, 0.2, 0.3],
+                                [0.2, 0.9, 0.9, 0.1]])
+        self.assertAlmostEqual(hydra._cost([0], cost_matrix), 2.2 / 4)
+        self.assertAlmostEqual(hydra._cost([1, 2], cost_matrix), 0.9 / 4)
+        self.assertAlmostEqual(hydra._cost([0, 1, 2, 3], cost_matrix), 0.1)
+        self.assertEqual(hydra._greedy_step([], cost_matrix), 1)
+        self.assertEqual(hydra._greedy_step([1], cost_matrix), 2)
+        self.assertEqual(hydra._greedy_step([1, 2], cost_matrix), 3)
+        self.assertEqual(hydra._greedy_step([1, 2, 3], cost_matrix), 0)
+
+        # learn 
+        hydra = Hydra(cost_estimation_model=LinearRegression())
+        hydra.add_result(result1, cs, None)
+        hydra.add_result(result2, cs, None)
+        self.assertEqual(list(hydra.learn())[0].get_dictionary(), {"A": 2.0, "B": 10.0})
+        self.assertEqual(list(hydra.learn())[1].get_dictionary(), {"A": 2.0, "B": 8.0})
+
+        hydra = Hydra(cost_estimation_model=LinearRegression())
+        hydra.add_result(result1, cs, ExactCostModel(1))
+        hydra.add_result(result2, cs, ExactCostModel(2))
+        self.assertEqual(list(hydra.learn())[0].get_dictionary(), {"A": 2.0, "B": 8.0})
+        self.assertEqual(list(hydra.learn())[1].get_dictionary(), {"A": 2.0, "B": 10.0})
+    
+    def test_model_warmstarting(self):
+        hydra = Hydra(cost_estimation_model=LinearRegression())
+        result1 = logged_results_to_HBS_result(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result1"))
+        result2 = logged_results_to_HBS_result(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result2"))
+        cs = ConfigSpace.ConfigurationSpace()
+        cs.add_hyperparameters([
+            ConfigSpace.hyperparameters.UniformFloatHyperparameter("A", lower=0, upper=10),
+            ConfigSpace.hyperparameters.UniformFloatHyperparameter("B", lower=0, upper=10)
+        ])
+
+        # train model
+        builder = WarmstartedModelBuilder()
+        r = builder.train_kde(result1, cs)
+        self.assertEqual(len(r[0]),1)
+        self.assertEqual(len(r[1]), 1)
+        self.assertEqual(r[0][0].data.shape, (3, 2))
+        self.assertEqual(r[1][0].data.shape, (6, 2))
+
+        # build
+        builder.add_result(result1, cs)
+        builder.add_result(result2, cs)
+        r = builder.build()
+        self.assertEqual(len(r.good_kdes), 2)
+        self.assertEqual(len(r.bad_kdes), 2)
+        self.assertEqual(len(r.kde_config_spaces), 2)

@@ -44,7 +44,7 @@ class InitialDesignLearner():
 
 
 class Hydra(InitialDesignLearner):
-    def __init__(self, cost_estimation_model=None, cost_calculation=np.argsort, num_processes=0):
+    def __init__(self, cost_estimation_model=None, cost_calculation=None, num_processes=0):
         self.results = list()
         self.config_spaces = list()
         self.exact_cost_models = list()
@@ -53,7 +53,7 @@ class Hydra(InitialDesignLearner):
         self.budgets = None
 
         self.cost_estimation_model = cost_estimation_model or RandomForestRegressor(n_estimators=100)
-        self.cost_calculation = cost_calculation
+        self.cost_calculation = cost_calculation or (lambda x: np.argsort(np.argsort(x)))
         self.num_repeat_imputation = 10
         self.num_processes = num_processes
 
@@ -101,7 +101,8 @@ class Hydra(InitialDesignLearner):
                     result = logged_results_to_HBS_result(result)
                 id2config = result.get_id2config_mapping()
                 trajectory = result.get_incumbent_trajectory(bigger_is_better=False, non_decreasing_budget=False)
-            except:
+            except Exception as e:
+                print(e)
                 print("No incumbent found!")
                 continue
             print("Incumbent loss:",  trajectory["losses"][-1], " budget:", trajectory["budgets"][-1])
