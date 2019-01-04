@@ -42,9 +42,11 @@ class InitialDesignLearner():
     def learn(self, num_configs=None):
         raise NotImplementedError
 
+def rank(x):
+    return np.argsort(np.argsort(x))
 
 class Hydra(InitialDesignLearner):
-    def __init__(self, cost_estimation_model=None, cost_calculation=None, num_processes=0):
+    def __init__(self, cost_estimation_model=None, cost_calculation=rank, num_processes=0):
         self.results = list()
         self.config_spaces = list()
         self.exact_cost_models = list()
@@ -53,7 +55,7 @@ class Hydra(InitialDesignLearner):
         self.budgets = None
 
         self.cost_estimation_model = cost_estimation_model or RandomForestRegressor(n_estimators=100)
-        self.cost_calculation = cost_calculation or (lambda x: np.argsort(np.argsort(x)))
+        self.cost_calculation = cost_calculation
         self.num_repeat_imputation = 10
         self.num_processes = num_processes
 
