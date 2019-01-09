@@ -156,5 +156,5 @@ class BOHB(Master):
 		ns = [max(int(n0*(eta**(-i))), 1) for i in range(s+1)]
 		iteration = SuccessiveHalving(HPB_iter=-1, num_configs=ns, budgets=self.budgets[(-s-1):], config_sampler=None, logger=self.logger, result_logger=self.result_logger)
 		for config in initial_design:
-			iteration.add_configuration(config.get_dictionary(), {"model_based_pick": "initial design"})
+			iteration.add_configuration(config.get_dictionary(), {"model_based_pick": "initial design:" + initial_design.current_origin()})
 		return iteration

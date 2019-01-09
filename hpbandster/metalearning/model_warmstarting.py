@@ -6,14 +6,16 @@ from hpbandster.optimizers.config_generators.bohb import BOHB as BohbConfigGener
 from hpbandster.core.dispatcher import Job
 
 class WarmstartedModel():
-    def __init__(self, good_kdes, bad_kdes, kde_config_spaces):
+    def __init__(self, good_kdes, bad_kdes, kde_config_spaces, origins):
         assert len(good_kdes) == len(bad_kdes) == len(kde_config_spaces)
         self.good_kdes = good_kdes
         self.bad_kdes = bad_kdes
         self.kde_config_spaces = kde_config_spaces
+        self.origins = origins
         self.current_config_space = None
         self.current_good_kdes = list()
         self.current_bad_kdes = list()
+        self.current_origins = list()
         self.weights = np.array([1] * len(good_kdes))
     
     def get_good_kdes(self):
@@ -25,8 +27,12 @@ class WarmstartedModel():
     def get_kde_configspaces(self):
         return self.kde_config_spaces + [self.current_config_space] * len(self.current_bad_kdes)
     
+    def get_origins(self):
+        return self.origins + self.current_origins
+    
     def update_weights(self, weights):
         assert np.all(weights >= 0)
+        print("\n".join(map(str, zip(self.get_origins(), self.weights))))
         self.weights = weights
     
     def set_current_config_space(self, current_config_space):
@@ -35,6 +41,7 @@ class WarmstartedModel():
     def set_current_kdes(self, kdes):
         self.current_good_kdes.extend([kde["good"] for budget, kde in sorted(kdes.items())])
         self.current_bad_kdes.extend([kde["bad"] for budget, kde in sorted(kdes.items())])
+        self.current_origins.append(["current:" + str(b) for b in sorted(kdes.keys())])
     
     def pdf(self, kdes, vector):
         pdf_values = np.zeros(len(kdes))
@@ -60,23 +67,27 @@ class WarmstartedModelBuilder():
         self.results = list()
         self.config_spaces = list()
         self.kde_config_spaces = list()
+        self.origins = list()
+        self.origins_with_budget = list()
     
-    def add_result(self, result, config_space):
+    def add_result(self, result, config_space, origin):
         self.results.append(result)
         self.config_spaces.append(config_space)
+        self.origins.append(origin)
     
     def build(self):
         good_kdes = list()
         bad_kdes = list()
-        for i, (result, config_space) in enumerate(zip(self.results, self.config_spaces)):
+        for i, (result, config_space, origin) in enumerate(zip(self.results, self.config_spaces, self.origins)):
             print(i)
             if isinstance(result, str):
                 result = logged_results_to_HBS_result(result)
-            good, bad = self.train_kde(result, config_space)
+            good, bad, budgets = self.train_kde(result, config_space)
             good_kdes.extend(good)
             bad_kdes.extend(bad)
             self.kde_config_spaces.extend([config_space] * len(good))
-        return WarmstartedModel(good_kdes, bad_kdes, self.kde_config_spaces)
+            self.origins_with_budget.extend([origin + ":" + str(b) for b in budgets])
+        return WarmstartedModel(good_kdes, bad_kdes, self.kde_config_spaces, self.origins_with_budget)
     
     def train_kde(self, result, config_space):
         cg = BohbConfigGenerator(config_space)
@@ -105,6 +116,7 @@ class WarmstartedModelBuilder():
         for j in build_model_jobs.values():
             cg.new_result(j, update_model=True)
         
-        good_kdes = [m["good"] for m in cg.kde_models.values()]
-        bad_kdes = [m["bad"] for m in cg.kde_models.values()]
-        return good_kdes, bad_kdes
+        good_kdes = [m["good"] for b, m in sorted(cg.kde_models.items())]
+        bad_kdes = [m["bad"] for b, m in sorted(cg.kde_models.items())]
+        budgets = sorted(cg.kde_models.keys())
+        return good_kdes, bad_kdes, budgets

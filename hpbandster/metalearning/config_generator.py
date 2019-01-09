@@ -11,12 +11,15 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         super().new_result(*args, **kwargs)
         self.warmstarted_model.set_current_kdes(self.kde_models)
 
+        # calculate weights
         kdes_good = self.warmstarted_model.get_good_kdes()
         kdes_bad  = self.warmstarted_model.get_bad_kdes()
         kde_configspaces = self.warmstarted_model.get_kde_configspaces()
 
         budgets = sorted(self.configs.keys())
         weights = np.zeros(len(kdes_good), dtype=float)
+
+        # consider all models of all budgets
         for budget in budgets:
             train_configs = np.array(self.configs[budget])
             train_losses =  np.array(self.losses[budget])
@@ -26,12 +29,12 @@ class MetaLearningBOHBConfigGenerator(BOHB):
 
             print(n_good, n_bad)
 
-            # Refit KDE for the current budget
             idx = np.argsort(train_losses)
 
             train_data_good = self.impute_conditional_data(train_configs[idx[:n_good]])
             train_data_bad  = self.impute_conditional_data(train_configs[idx[n_good:n_good+n_bad]])
 
+            # calculate the sum of likelihoods
             for i, (good_kde, bad_kde, kde_configspace) in enumerate(zip(kdes_good, kdes_bad, kde_configspaces)):
                 train_data_good_compatible = make_vector_compatible(train_data_good, self.configspace, kde_configspace)
                 train_data_bad__compatible  = make_vector_compatible(train_data_bad,  self.configspace, kde_configspace)
