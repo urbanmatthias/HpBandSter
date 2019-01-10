@@ -99,7 +99,10 @@ class WarmstartedModelBuilder():
         for i, (result, config_space, origin) in enumerate(zip(self.results, self.config_spaces, self.origins)):
             print(i)
             if isinstance(result, str):
-                result = logged_results_to_HBS_result(result)
+                try:
+                    result = logged_results_to_HBS_result(result)
+                except:
+                    continue
             good, bad, budgets = self.train_kde(result, config_space)
             good_kdes.extend(good)
             bad_kdes.extend(bad)
