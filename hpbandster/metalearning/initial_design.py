@@ -1,4 +1,5 @@
 import numpy as np
+import time
 from hpbandster.metalearning.util import make_config_compatible
 from hpbandster.optimizers.config_generators.bohb import BOHB as BohbConfigGenerator
 from hpbandster.core.result import logged_results_to_HBS_result
@@ -6,7 +7,7 @@ from ConfigSpace import Configuration
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.base import clone
-from multiprocessing import Pool
+import multiprocessing as mp
 
 class InitialDesign():
     def __init__(self, configs, origins):
@@ -48,7 +49,7 @@ def rank(x):
     return np.argsort(np.argsort(x))
 
 class Hydra(InitialDesignLearner):
-    def __init__(self, cost_estimation_model=None, cost_calculation=rank, num_processes=0):
+    def __init__(self, cost_estimation_model=None, cost_calculation=rank, num_processes=0, distributed=False, run_id=0, working_dir=".", master=True):
         self.results = list()
         self.config_spaces = list()
         self.exact_cost_models = list()
@@ -62,6 +63,10 @@ class Hydra(InitialDesignLearner):
         self.cost_calculation = cost_calculation
         self.num_repeat_imputation = 10
         self.num_processes = num_processes
+        self.distributed = distributed
+        self.run_id = run_id
+        self.working_dir = working_dir
+        self.master = master
 
     def add_result(self, result, config_space, origin, exact_cost_model=None):
         self.results.append(result)
@@ -72,6 +77,8 @@ class Hydra(InitialDesignLearner):
     def learn(self, num_configs=None):
         cost_matrix = self._get_cost_matrix()
         print(cost_matrix)
+        if self.distributed and not self.master:
+            return None
 
         initial_design = []
         num_configs = num_configs or len(self.results)
@@ -92,12 +99,20 @@ class Hydra(InitialDesignLearner):
 
     def _get_cost_matrix(self):
         self._get_incumbents()
-        if self.num_processes == 0:
+        if self.num_processes == 0 and not self.distributed:
+            print("A")
             ranks = map(self._get_cost_matrix_column, enumerate(zip(self.results, self.config_spaces, self.exact_cost_models)))
-        else:
-            with Pool(self.num_processes) as p:
+        elif not self.distributed:
+            print("B")
+            with mp.Pool(self.num_processes) as p:
                 ranks = p.map(self._get_cost_matrix_column, enumerate(zip(self.results, self.config_spaces, self.exact_cost_models)))
-        ranks = np.hstack(ranks)  # incumbents x estimated performances on datasets
+        else:
+            print("C")
+            with DistributedMap(self.run_id, self.working_dir, self.master) as p:
+                ranks = p.map(self._get_cost_matrix_column, enumerate(zip(self.results, self.config_spaces, self.exact_cost_models)))
+            if not self.master:
+                return None
+        ranks = np.hstack(ranks) # incumbents x estimated performances on datasets
         return ranks
 
     def _get_incumbents(self):
@@ -168,3 +183,114 @@ class Hydra(InitialDesignLearner):
         print(model.score(config_generator.impute_conditional_data(np.vstack(X_list)), np.array(y_list)))
 
         return model, config_generator.impute_conditional_data
+
+import Pyro4
+import os
+import pickle
+import traceback
+
+@Pyro4.expose
+class DistributedMap():
+    def __init__(self, run_id, working_dir, master):
+        self.run_id = run_id
+        self.working_dir = working_dir
+        self.master = master
+
+        self.daemon = None
+        self.uri = None
+        self.results = list()
+        self.iterator_done = False
+
+        self.iterator = None
+        self.func = None
+    
+    def __enter__(self):
+        if self.master:
+            self.old_server_type = Pyro4.config.SERVERTYPE
+            Pyro4.config.SERVERTYPE = "multiplex"
+            self.daemon = Pyro4.Daemon()
+            self.uri = self.daemon.register(self)
+        return self
+    
+    def __exit__(self, error_type, error_value, error_traceback):
+        if self.master:
+            Pyro4.config.SERVERTYPE = self.old_server_type
+        return error_type is not None
+
+
+    def map(self, func, iterator):
+        self.iterator = enumerate(iterator)
+        self.func = func
+
+        print("distributed map called")
+
+        if self.master:
+            return self.start_master()
+        return self.start_worker()
+
+    
+    def start_worker(self):
+        print("start worker")
+        while True:
+            try:
+                with open(os.path.join(self.working_dir, "distributed_map_uri_%s.txt" % self.run_id), "r") as f:
+                    self.uri = f.readline().strip()
+                    print("loaded uri", self.uri)
+                    if self.uri == "shutdown":
+                        return None
+                    master = Pyro4.Proxy(self.uri)
+                    i = master.get_item()
+                    while i is not None:
+                        item = self.get_item_by_idx(i)
+                        print("working on", i)
+                        result = self.func(item)
+                        master.register_result(i, result.tolist())
+                        i = master.get_item()
+            except Exception as e:
+                print(e)
+                traceback.print_exc()
+                print("".join(Pyro4.util.getPyroTraceback()))
+                print("Sleeping")
+                time.sleep(30)
+
+    
+    def start_master(self):
+        print("start_master")
+        with open(os.path.join(self.working_dir, "distributed_map_uri_%s.txt" % self.run_id), "w") as f:
+            print(self.uri, file=f)
+
+        self.daemon.requestLoop()
+        print("distributed map finished")
+        return self.results
+        
+    # WORKER
+    def get_item_by_idx(self, idx):
+        for i, item in self.iterator:
+            if i == idx:
+                return item
+    
+    # MASTER
+    def get_item(self):
+        try:
+            i, item = next(self.iterator)
+            self.results.append("NO_RESULT")
+            print("assigned", i)
+            return i
+        except StopIteration:
+            print("all jobs assigned")
+            self.iterator_done = True
+            with open(os.path.join(self.working_dir, "distributed_map_uri_%s.txt" % self.run_id), "w") as f:
+                print("shutdown", file=f)
+            if self.iterator_done and not any(isinstance(r, str) and r == "NO_RESULT" for r in self.results):
+                self.daemon.shutdown()
+            return None
+    
+    # MASTER
+    def register_result(self, i, result):
+        print("Registered result", i, result)
+        self.results[i] = np.array(result)
+        print("All jobs assigned:", self.iterator_done)
+        print("Waiting for results:", any(isinstance(r, str) and r == "NO_RESULT" for r in self.results))
+
+        if self.iterator_done and not any(isinstance(r, str) and r == "NO_RESULT" for r in self.results):
+            self.daemon.shutdown()

@@ -81,12 +81,14 @@ class WarmstartedModel():
         )
 
 class WarmstartedModelBuilder():
-    def __init__(self):
+    def __init__(self, distributed=False, master=True):
         self.results = list()
         self.config_spaces = list()
         self.kde_config_spaces = list()
         self.origins = list()
         self.origins_with_budget = list()
+        self.distributed = distributed
+        self.master = master
     
     def add_result(self, result, config_space, origin):
         self.results.append(result)
@@ -94,6 +96,8 @@ class WarmstartedModelBuilder():
         self.origins.append(origin)
     
     def build(self):
+        if self.distributed and not self.master:
+            return None
         good_kdes = list()
         bad_kdes = list()
         for i, (result, config_space, origin) in enumerate(zip(self.results, self.config_spaces, self.origins)):
