@@ -49,7 +49,8 @@ def rank(x):
     return np.argsort(np.argsort(x))
 
 class Hydra(InitialDesignLearner):
-    def __init__(self, cost_estimation_model=None, cost_calculation=rank, num_processes=0, distributed=False, run_id=0, working_dir=".", master=True):
+    def __init__(self, cost_estimation_model=None, cost_calculation=rank, num_processes=0, 
+            distributed=False, run_id=0, working_dir=".", master=True, host='localhost'):
         self.results = list()
         self.config_spaces = list()
         self.exact_cost_models = list()
@@ -67,6 +68,7 @@ class Hydra(InitialDesignLearner):
         self.run_id = run_id
         self.working_dir = working_dir
         self.master = master
+        self.host = host
 
     def add_result(self, result, config_space, origin, exact_cost_model=None):
         self.results.append(result)
@@ -108,7 +110,7 @@ class Hydra(InitialDesignLearner):
                 ranks = p.map(self._get_cost_matrix_column, enumerate(zip(self.results, self.config_spaces, self.exact_cost_models)))
         else:
             print("C")
-            with DistributedMap(self.run_id, self.working_dir, self.master) as p:
+            with DistributedMap(self.run_id, self.working_dir, self.master, self.host) as p:
                 ranks = p.map(self._get_cost_matrix_column, enumerate(zip(self.results, self.config_spaces, self.exact_cost_models)))
             if not self.master:
                 return None
@@ -191,10 +193,11 @@ import traceback
 
 @Pyro4.expose
 class DistributedMap():
-    def __init__(self, run_id, working_dir, master):
+    def __init__(self, run_id, working_dir, master, host):
         self.run_id = run_id
         self.working_dir = working_dir
         self.master = master
+        self.host = host
 
         self.daemon = None
         self.uri = None
@@ -208,7 +211,7 @@ class DistributedMap():
         if self.master:
             self.old_server_type = Pyro4.config.SERVERTYPE
             Pyro4.config.SERVERTYPE = "multiplex"
-            self.daemon = Pyro4.Daemon()
+            self.daemon = Pyro4.Daemon(host=self.host)
             self.uri = self.daemon.register(self)
         return self
     
