@@ -147,11 +147,11 @@ class Hydra(InitialDesignLearner):
         if exact_cost_model is None:
             try:
                 model, imputer = self._train_cost_estimation_model(result, config_space)
+                X = np.vstack([make_config_compatible(i, config_space).get_array() for i in self.incumbents])
+                predicted_losses = model.predict(imputer(X))
             except:
                 print("No model trained")
-                raise
-            X = np.vstack([make_config_compatible(i, config_space).get_array() for i in self.incumbents])
-            predicted_losses = model.predict(imputer(X))
+                predicted_losses = np.array([0] * len(self.incumbents))
         
         # compute the cost exactly using given exact cost model
         else:
