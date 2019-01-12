@@ -158,7 +158,11 @@ class Hydra(InitialDesignLearner):
             predicted_losses = np.zeros(len(self.incumbents))
             with exact_cost_model as m:
                 for i, (incumbent, budget) in enumerate(zip(self.incumbents, self.budgets)):
-                    predicted_losses[i] = m.evaluate(make_config_compatible(incumbent, config_space), budget)
+                    try:
+                        predicted_losses[i] = m.evaluate(make_config_compatible(incumbent, config_space), budget)
+                    except Exception as e:
+                        print(e)
+                        predicted_losses[i] = float("inf")
         return self.cost_calculation(predicted_losses).reshape((-1, 1))
 
     def _train_cost_estimation_model(self, result, config_space):
