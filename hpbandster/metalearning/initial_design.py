@@ -87,7 +87,10 @@ class Hydra(InitialDesignLearner):
         for _ in range(num_configs):
             if len(initial_design) == len(self.incumbents):
                 break
-            new_incumbent = self._greedy_step(initial_design, cost_matrix)
+            try:
+                new_incumbent = self._greedy_step(initial_design, cost_matrix)
+            except:
+                break
             initial_design.append(new_incumbent)
             print("Initial Design:", initial_design, "Cost:", self._cost(initial_design, cost_matrix))
         initial_design_configs = [self.incumbents[i] for i in initial_design]
