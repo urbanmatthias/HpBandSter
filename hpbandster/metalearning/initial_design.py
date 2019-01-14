@@ -99,6 +99,10 @@ class Hydra(InitialDesignLearner):
 
     def _greedy_step(self, initial_design, cost_matrix):
         available_incumbents = set(range(len(self.incumbents))) - set(initial_design)
+        print("Greedy step:")
+        print("All incumbents:", sorted(set(range(len(self.incumbents)))))
+        print("Initial design:", sorted(set(set(initial_design))))
+        print("Available incumbents:", sorted(available_incumbents))
         return min(available_incumbents, key=lambda inc: self._cost(initial_design + [inc], cost_matrix))
 
     def _cost(self, initial_design, cost_matrix):
