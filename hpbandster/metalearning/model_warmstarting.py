@@ -39,7 +39,7 @@ class WarmstartedModel():
         self.weight_history["SUM_OF_WEIGHTS"].append(np.sum(weights))
         for i, origin in enumerate(self.get_origins()):
             if origin not in self.weight_history:
-                self.weight_history[origin] = list()
+                self.weight_history[origin] = [0] * (len(self.weight_history["SUM_OF_WEIGHTS"]) - 1)
             self.weight_history[origin].append(weights[i])
         self.weights = weights
     
