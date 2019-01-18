@@ -71,10 +71,19 @@ class Hydra(InitialDesignLearner):
         self.host = host
 
     def add_result(self, result, config_space, origin, exact_cost_model=None):
+        try:
+            if isinstance(result, str):
+                result = logged_results_to_HBS_result(result)
+            result.get_incumbent_trajectory(bigger_is_better=False, non_decreasing_budget=False)
+        except:
+            print("Did not add empty result")
+            return False
+
         self.results.append(result)
         self.config_spaces.append(config_space)
         self.exact_cost_models.append(exact_cost_model)
         self.origins.append(origin)
+        return True
 
     def learn(self, num_configs=None):
         cost_matrix = self._get_cost_matrix()
@@ -84,13 +93,8 @@ class Hydra(InitialDesignLearner):
 
         initial_design = []
         num_configs = num_configs or len(self.results)
-        for _ in range(num_configs):
-            if len(initial_design) == len(self.incumbents):
-                break
-            try:
-                new_incumbent = self._greedy_step(initial_design, cost_matrix)
-            except:
-                break
+        for _ in range(max(num_configs, len(self.incumbents))):
+            new_incumbent = self._greedy_step(initial_design, cost_matrix)
             initial_design.append(new_incumbent)
             print("Initial Design:", initial_design, "Cost:", self._cost(initial_design, cost_matrix))
         initial_design_configs = [self.incumbents[i] for i in initial_design]
@@ -99,10 +103,6 @@ class Hydra(InitialDesignLearner):
 
     def _greedy_step(self, initial_design, cost_matrix):
         available_incumbents = set(range(len(self.incumbents))) - set(initial_design)
-        print("Greedy step:")
-        print("All incumbents:", sorted(set(range(len(self.incumbents)))))
-        print("Initial design:", sorted(set(set(initial_design))))
-        print("Available incumbents:", sorted(available_incumbents))
         return min(available_incumbents, key=lambda inc: self._cost(initial_design + [inc], cost_matrix))
 
     def _cost(self, initial_design, cost_matrix):
@@ -131,15 +131,11 @@ class Hydra(InitialDesignLearner):
         self.incumbent_origins = list()
         self.budgets = list()
         for i, (result, config_space) in enumerate(zip(self.results, self.config_spaces)):
-            try:
-                if isinstance(result, str):
-                    result = logged_results_to_HBS_result(result)
-                id2config = result.get_id2config_mapping()
-                trajectory = result.get_incumbent_trajectory(bigger_is_better=False, non_decreasing_budget=False)
-            except Exception as e:
-                print(e)
-                print("No incumbent found!")
-                continue
+            if isinstance(result, str):
+                result = logged_results_to_HBS_result(result)
+            id2config = result.get_id2config_mapping()
+            trajectory = result.get_incumbent_trajectory(bigger_is_better=False, non_decreasing_budget=False)
+
             print("Incumbent loss:",  trajectory["losses"][-1], " budget:", trajectory["budgets"][-1])
             incumbent = id2config[trajectory["config_ids"][-1]]["config"]
             self.incumbents.append(Configuration(config_space, incumbent))

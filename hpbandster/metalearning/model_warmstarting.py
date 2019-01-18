@@ -91,9 +91,18 @@ class WarmstartedModelBuilder():
         self.master = master
     
     def add_result(self, result, config_space, origin):
+        try:
+            if isinstance(result, str):
+                result = logged_results_to_HBS_result(result)
+            result.get_incumbent_trajectory(bigger_is_better=False, non_decreasing_budget=False)
+        except:
+            print("Did not add empty result")
+            return False
+
         self.results.append(result)
         self.config_spaces.append(config_space)
         self.origins.append(origin)
+        return True
     
     def build(self):
         if self.distributed and not self.master:

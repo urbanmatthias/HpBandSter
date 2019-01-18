@@ -62,8 +62,11 @@ class TestMetaLearning(unittest.TestCase):
     def test_initial_design(self):
         # test train cost estimation model
         hydra = Hydra(cost_estimation_model=LinearRegression())
-        result1 = logged_results_to_HBS_result(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result1"))
-        result2 = logged_results_to_HBS_result(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result2"))
+        result1_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result1")
+        result2_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result2")
+        empty_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "empty_result")
+        result1 = logged_results_to_HBS_result(result1_path)
+        result2 = logged_results_to_HBS_result(result2_path)
         cs = ConfigSpace.ConfigurationSpace()
         cs.add_hyperparameters([
             ConfigSpace.hyperparameters.UniformFloatHyperparameter("A", lower=0, upper=10),
@@ -100,7 +103,7 @@ class TestMetaLearning(unittest.TestCase):
         # test get_incumbents
         hydra = Hydra(cost_estimation_model=LinearRegression())
         hydra.results = [result1, result2]
-        hydra.config_spaces = [cs, cs]
+        hydra.config_spaces = [cs, cs, cs]
         hydra.origins = ["result1", "result2"]
         hydra._get_incumbents()
         self.assertEqual(hydra.incumbents, [ConfigSpace.Configuration(cs, values={"A": 2, "B": 8}),
@@ -110,9 +113,9 @@ class TestMetaLearning(unittest.TestCase):
         # test get_cost_matrix
         hydra = Hydra(cost_estimation_model=LinearRegression())
         hydra.results = [result1, result2]
-        hydra.config_spaces = [cs, cs]
+        hydra.config_spaces = [cs, cs, cs]
         hydra.origins = ["result1", "result2"]
-        hydra.exact_cost_models = [None, None]
+        hydra.exact_cost_models = [None, None, None]
         r = hydra._get_cost_matrix()
         np.testing.assert_array_almost_equal(r, np.array([[1, 1], [0, 0]]))
         hydra.exact_cost_models = [ExactCostModel(1), ExactCostModel(2)]
@@ -136,21 +139,27 @@ class TestMetaLearning(unittest.TestCase):
 
         # learn 
         hydra = Hydra(cost_estimation_model=LinearRegression())
-        hydra.add_result(result1, cs, "result1", None)
-        hydra.add_result(result2, cs, "result2", None)
+        hydra.add_result(empty_path, cs, "empty", None)
+        hydra.add_result(result1_path, cs, "result1", None)
+        hydra.add_result(result2_path, cs, "result2", None)
         self.assertEqual(list(hydra.learn())[0][0].get_dictionary(), {"A": 2.0, "B": 10.0})
         self.assertEqual(list(hydra.learn())[1][0].get_dictionary(), {"A": 2.0, "B": 8.0})
 
         hydra = Hydra(cost_estimation_model=LinearRegression())
-        hydra.add_result(result1, cs, "result1", ExactCostModel(1))
-        hydra.add_result(result2, cs, "result2", ExactCostModel(2))
+        hydra.add_result(empty_path, cs, "empty", ExactCostModel(1))
+        hydra.add_result(result1_path, cs, "result1", ExactCostModel(1))
+        hydra.add_result(result2_path, cs, "result2", ExactCostModel(2))
         self.assertEqual(list(hydra.learn())[0][0].get_dictionary(), {"A": 2.0, "B": 8.0})
         self.assertEqual(list(hydra.learn())[1][0].get_dictionary(), {"A": 2.0, "B": 10.0})
     
     def test_model_warmstarting(self):
         hydra = Hydra(cost_estimation_model=LinearRegression())
-        result1 = logged_results_to_HBS_result(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result1"))
-        result2 = logged_results_to_HBS_result(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result2"))
+        result1_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result1")
+        result2_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result2")
+        empty_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "empty_result")
+        result1 = logged_results_to_HBS_result(result1_path)
+        result2 = logged_results_to_HBS_result(result2_path)
+
         cs = ConfigSpace.ConfigurationSpace()
         cs.add_hyperparameters([
             ConfigSpace.hyperparameters.UniformFloatHyperparameter("A", lower=0, upper=10),
@@ -166,6 +175,7 @@ class TestMetaLearning(unittest.TestCase):
         self.assertEqual(r[1][0].data.shape, (6, 2))
 
         # build
+        builder.add_result(empty_path, cs, "empty")
         builder.add_result(result1, cs, "result1")
         builder.add_result(result2, cs, "result2")
         r = builder.build()
