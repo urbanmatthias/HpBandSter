@@ -101,6 +101,7 @@ class TestMetaLearning(unittest.TestCase):
         hydra = Hydra(cost_estimation_model=LinearRegression())
         hydra.results = [result1, result2]
         hydra.config_spaces = [cs, cs]
+        hydra.origins = ["result1", "result2"]
         hydra._get_incumbents()
         self.assertEqual(hydra.incumbents, [ConfigSpace.Configuration(cs, values={"A": 2, "B": 8}),
                                             ConfigSpace.Configuration(cs, values={"A": 2, "B": 10})])
@@ -110,6 +111,7 @@ class TestMetaLearning(unittest.TestCase):
         hydra = Hydra(cost_estimation_model=LinearRegression())
         hydra.results = [result1, result2]
         hydra.config_spaces = [cs, cs]
+        hydra.origins = ["result1", "result2"]
         hydra.exact_cost_models = [None, None]
         r = hydra._get_cost_matrix()
         np.testing.assert_array_almost_equal(r, np.array([[1, 1], [0, 0]]))
@@ -134,16 +136,16 @@ class TestMetaLearning(unittest.TestCase):
 
         # learn 
         hydra = Hydra(cost_estimation_model=LinearRegression())
-        hydra.add_result(result1, cs, None)
-        hydra.add_result(result2, cs, None)
-        self.assertEqual(list(hydra.learn())[0].get_dictionary(), {"A": 2.0, "B": 10.0})
-        self.assertEqual(list(hydra.learn())[1].get_dictionary(), {"A": 2.0, "B": 8.0})
+        hydra.add_result(result1, cs, "result1", None)
+        hydra.add_result(result2, cs, "result2", None)
+        self.assertEqual(list(hydra.learn())[0][0].get_dictionary(), {"A": 2.0, "B": 10.0})
+        self.assertEqual(list(hydra.learn())[1][0].get_dictionary(), {"A": 2.0, "B": 8.0})
 
         hydra = Hydra(cost_estimation_model=LinearRegression())
-        hydra.add_result(result1, cs, ExactCostModel(1))
-        hydra.add_result(result2, cs, ExactCostModel(2))
-        self.assertEqual(list(hydra.learn())[0].get_dictionary(), {"A": 2.0, "B": 8.0})
-        self.assertEqual(list(hydra.learn())[1].get_dictionary(), {"A": 2.0, "B": 10.0})
+        hydra.add_result(result1, cs, "result1", ExactCostModel(1))
+        hydra.add_result(result2, cs, "result2", ExactCostModel(2))
+        self.assertEqual(list(hydra.learn())[0][0].get_dictionary(), {"A": 2.0, "B": 8.0})
+        self.assertEqual(list(hydra.learn())[1][0].get_dictionary(), {"A": 2.0, "B": 10.0})
     
     def test_model_warmstarting(self):
         hydra = Hydra(cost_estimation_model=LinearRegression())
@@ -164,8 +166,8 @@ class TestMetaLearning(unittest.TestCase):
         self.assertEqual(r[1][0].data.shape, (6, 2))
 
         # build
-        builder.add_result(result1, cs)
-        builder.add_result(result2, cs)
+        builder.add_result(result1, cs, "result1")
+        builder.add_result(result2, cs, "result2")
         r = builder.build()
         self.assertEqual(len(r.good_kdes), 2)
         self.assertEqual(len(r.bad_kdes), 2)
