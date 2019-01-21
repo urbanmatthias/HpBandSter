@@ -1,5 +1,6 @@
 import numpy as np
 import time
+import os
 from hpbandster.metalearning.util import make_config_compatible
 from hpbandster.optimizers.config_generators.bohb import BOHB as BohbConfigGenerator
 from hpbandster.core.result import logged_results_to_HBS_result
@@ -8,16 +9,21 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.base import clone
 import multiprocessing as mp
+from NamedAtomicLock import NamedAtomicLock
 
 class InitialDesign():
-    def __init__(self, configs, origins):
+    def __init__(self, configs, origins, num_configs_per_sh_iter):
         self.pointer = 0
         self.configs = configs
         self.config_space = None
         self.origins = origins
+        self.num_configs_per_sh_iter = num_configs_per_sh_iter
     
     def set_config_space(self, config_space):
         self.config_space = config_space
+    
+    def get_num_configs(self):
+        return self.num_configs_per_sh_iter
     
     def __len__(self):
         return len(self.configs)
@@ -49,260 +55,185 @@ def rank(x):
     return np.argsort(np.argsort(x))
 
 class Hydra(InitialDesignLearner):
-    def __init__(self, cost_estimation_model=None, cost_calculation=rank, num_processes=0, 
-            distributed=False, run_id=0, working_dir=".", master=True, host='localhost'):
+    def __init__(self, normalize_loss=rank, bigger_is_better=True):
+        self.incumbents = None
+        self.origins = None
+
+        self.loss_matrices = dict()
+
+        self.normalize_loss = normalize_loss
+        self.bigger_is_better = bigger_is_better
+
+    def set_incumbent_losses(self, losses, incumbent_dict):
+        self.origins = sorted(list(incumbent_dict.keys()))
+        self.incumbents = [incumbent_dict[origin] for origin in self.origins]
+        budgets = set(map(lambda x:x["budget"], losses))
+        self.loss_matrices = {b: np.zeros((len(self.origins), len(self.origins))) for b in budgets}
+
+        origin_to_id = {origin: i for i, origin in enumerate(self.origins)}
+
+        for l in losses:
+            incumbent_id = origin_to_id[l["incumbent_origin"]]
+            dataset_id = origin_to_id[l["dataset_origin"]]
+            self.loss_matrices[l["budget"]][incumbent_id, dataset_id] = l["loss"]
+
+    def learn(self, num_min_budget, num_max_budget, max_sh_iter):
+        initial_design = []
+        for _ in range(min(num_min_budget, len(self.incumbents))):
+            new_incumbent, cost = self._greedy_step(initial_design, num_max_budget, max_sh_iter)
+            initial_design.append(new_incumbent)
+            print("Initial Design:", initial_design, "Cost:", cost)
+
+        initial_design_configs = [self.incumbents[i] for i in initial_design]
+        initial_design_origins = [self.origins[i] for i in initial_design]
+        num_configs_per_sh_iter = self.get_num_configs_per_sh_iter(len(initial_design), num_max_budget, max_sh_iter)
+        return InitialDesign(initial_design_configs, initial_design_origins, num_configs_per_sh_iter)
+    
+    def get_num_configs_per_sh_iter(self, num_min_budget, num_max_budget, max_sh_iter):
+        num_max_budget = min(num_min_budget, num_max_budget)
+        s = max_sh_iter - 1
+        eta = (num_min_budget / num_max_budget) ** (1 / s)
+        n0 = num_min_budget
+        ns = [max(int(n0 * (eta ** (-i))), 1) for i in range(s + 1)]
+        print(ns)
+        return ns
+
+    def _greedy_step(self, initial_design, num_max_budget, max_sh_iter):
+        # check number of configurations per sh iteration to estimate cost
+        num_configs_per_sh_iter = self.get_num_configs_per_sh_iter(len(initial_design) + 1, num_max_budget, max_sh_iter)
+
+        # return best from available incumbents
+        available_incumbents = set(range(len(self.incumbents))) - set(initial_design)
+
+        def cost_of_incumbent(inc):
+            return self._cost(initial_design + [inc], num_configs_per_sh_iter)
+
+        inc = min(available_incumbents, key=cost_of_incumbent)
+        return inc, cost_of_incumbent(inc)
+
+    def _cost(self, initial_design, num_configs_per_sh_iter):
+        dataset_costs = list()
+        budgets = sorted(list(self.loss_matrices.keys()))
+        assert len(budgets) == len(num_configs_per_sh_iter)
+
+        # iterate over all datasets
+        for d in range(len(self.origins)):
+            current_cost = float("inf")
+            current_configs = np.array(initial_design)
+    
+            # simulate SH
+            for i, b in enumerate(budgets):
+
+                # cost in current SH iteration
+                losses = self.loss_matrices[b][:, d]
+                normalized_losses = self.normalize_loss(losses)
+
+                cost = np.min(normalized_losses[current_configs])
+                if not self.bigger_is_better or b == max(budgets):
+                    current_cost = min(cost, current_cost)
+                
+                # update configs for next SH iteration
+                if b != max(budgets):
+                    ranks = np.argsort(np.argsort(losses[current_configs]))
+                    current_configs = current_configs[ranks < num_configs_per_sh_iter[i + 1]]
+            
+            assert np.isfinite(current_cost)
+            dataset_costs.append(current_cost)
+
+        return np.mean(dataset_costs)
+
+
+class LossMatrixComputation():
+    def __init__(self, bigger_is_better=True):
         self.results = list()
         self.config_spaces = list()
-        self.exact_cost_models = list()
         self.origins = list()
-
-        self.incumbents = None
+        self.exact_cost_models = list()
+        self.bigger_is_better = bigger_is_better
         self.budgets = None
-        self.incumbent_origins = None
 
-        self.cost_estimation_model = cost_estimation_model or RandomForestRegressor(n_estimators=100)
-        self.cost_calculation = cost_calculation
-        self.num_repeat_imputation = 10
-        self.num_processes = num_processes
-        self.distributed = distributed
-        self.run_id = run_id
-        self.working_dir = working_dir
-        self.master = master
-        self.host = host
-
-    def add_result(self, result, config_space, origin, exact_cost_model=None):
+    def add_result(self, result, config_space, origin, exact_cost_model):
         try:
             if isinstance(result, str):
-                result = logged_results_to_HBS_result(result)
-            result.get_incumbent_trajectory(bigger_is_better=False, non_decreasing_budget=False)
+                r = logged_results_to_HBS_result(result)
+            r.get_incumbent_trajectory(bigger_is_better=False, non_decreasing_budget=False)
         except:
             print("Did not add empty result")
             return False
 
+        all_runs = r.get_all_runs(only_largest_budget=False)
+        budgets = sorted(set(map(lambda r: r.budget, all_runs)))
+        if self.budgets is None:
+            self.budgets = budgets
+        else:
+            assert self.budgets == budgets, "Budgets of all results need to be equivalent"
+
         self.results.append(result)
         self.config_spaces.append(config_space)
-        self.exact_cost_models.append(exact_cost_model)
         self.origins.append(origin)
+        self.exact_cost_models.append(exact_cost_model)
         return True
+    
+    def write_loss(self, path, entry):
+        loss, incumbent_id, dataset_id, budget = self.compute_cost_matrix_entry(entry)
+        incumbent_origin = self.origins[incumbent_id]
+        dataset_origin = self.origins[dataset_id]
 
-    def learn(self, num_configs=None):
-        cost_matrix = self._get_cost_matrix()
-        print(cost_matrix)
-        if self.distributed and not self.master:
-            return None
+        lock_name = path.replace(os.sep, '')
+        lock = NamedAtomicLock(lock_name)
+        print("acquire named lock:", lock_name)
+        lock.acquire()
+        print("success")
 
-        initial_design = []
-        num_configs = num_configs or len(self.results)
-        for _ in range(max(num_configs, len(self.incumbents))):
-            new_incumbent = self._greedy_step(initial_design, cost_matrix)
-            initial_design.append(new_incumbent)
-            print("Initial Design:", initial_design, "Cost:", self._cost(initial_design, cost_matrix))
-        initial_design_configs = [self.incumbents[i] for i in initial_design]
-        initial_design_origins = [self.incumbent_origins[i] for i in initial_design]
-        return InitialDesign(initial_design_configs, initial_design_origins)
+        with open(path, "a") as f:
+            print("\t".join(map(str, [loss, incumbent_origin, dataset_origin, budget])), file=f)
 
-    def _greedy_step(self, initial_design, cost_matrix):
-        available_incumbents = set(range(len(self.incumbents))) - set(initial_design)
-        return min(available_incumbents, key=lambda inc: self._cost(initial_design + [inc], cost_matrix))
+        print("release lock")
+        lock.release()
+    
+    def read_loss(self, path):
+        losses = list()
+        with open(path, "r") as f:
+            for line in f:
+                loss, incumbent_origin, dataset_origin, budget = line.split("\t")
+                entry = {
+                    "loss": float(loss),
+                    "incumbent_origin": incumbent_origin,
+                    "dataset_origin": dataset_origin,
+                    "budget": float(budget)
+                }
+                losses.append(entry)
+        incumbents = {self.origins[i]: self._get_incumbent(i) for i in range(len(self.origins))}
+        return losses, incumbents
 
-    def _cost(self, initial_design, cost_matrix):
-        return np.mean(np.min(cost_matrix[np.array(initial_design), :], axis=0))
+    def compute_cost_matrix_entry(self, entry):
+        num_matrix_entries = len(self.results) * len(self.results)
+        matrix_entry = entry % num_matrix_entries
+        incumbent_id = matrix_entry % len(self.results)
+        dataset_id = matrix_entry // len(self.results)
 
-    def _get_cost_matrix(self):
-        self._get_incumbents()
-        if self.num_processes == 0 and not self.distributed:
-            print("A")
-            ranks = map(self._get_cost_matrix_column, enumerate(zip(self.results, self.config_spaces, self.exact_cost_models)))
-        elif not self.distributed:
-            print("B")
-            with mp.Pool(self.num_processes) as p:
-                ranks = p.map(self._get_cost_matrix_column, enumerate(zip(self.results, self.config_spaces, self.exact_cost_models)))
-        else:
-            print("C")
-            with DistributedMap(self.run_id, self.working_dir, self.master, self.host) as p:
-                ranks = p.map(self._get_cost_matrix_column, enumerate(zip(self.results, self.config_spaces, self.exact_cost_models)))
-            if not self.master:
-                return None
-        ranks = np.hstack(ranks) # incumbents x estimated performances on datasets
-        return ranks
+        budget = self.budgets[entry // num_matrix_entries]
+        incumbent = self._get_incumbent(incumbent_id)
+        exact_cost_model = self.exact_cost_models[dataset_id]
+        config_space = self.config_spaces[dataset_id]
 
-    def _get_incumbents(self):
-        self.incumbents = list()
-        self.incumbent_origins = list()
-        self.budgets = list()
-        for i, (result, config_space) in enumerate(zip(self.results, self.config_spaces)):
-            if isinstance(result, str):
-                result = logged_results_to_HBS_result(result)
-            id2config = result.get_id2config_mapping()
-            trajectory = result.get_incumbent_trajectory(bigger_is_better=False, non_decreasing_budget=False)
-
-            print("Incumbent loss:",  trajectory["losses"][-1], " budget:", trajectory["budgets"][-1])
-            incumbent = id2config[trajectory["config_ids"][-1]]["config"]
-            self.incumbents.append(Configuration(config_space, incumbent))
-            self.incumbent_origins.append(self.origins[i])
-            self.budgets.append(trajectory["budgets"][-1])
-
-    def _get_cost_matrix_column(self, args):
-        column_idx, result, config_space, exact_cost_model = args[0], args[1][0], args[1][1], args[1][2]
-        print(column_idx)
-        if isinstance(result, str):
-            result = logged_results_to_HBS_result(result)
-
-        # no model given to compute cost exactly. Evaluate by learning the cost for each run using cost_estimation_model.
-        if exact_cost_model is None:
+        with exact_cost_model as m:
             try:
-                model, imputer = self._train_cost_estimation_model(result, config_space)
-                X = np.vstack([make_config_compatible(i, config_space).get_array() for i in self.incumbents])
-                predicted_losses = model.predict(imputer(X))
-            except:
-                print("No model trained")
-                predicted_losses = np.array([0] * len(self.incumbents))
-        
-        # compute the cost exactly using given exact cost model
-        else:
-            predicted_losses = np.zeros(len(self.incumbents))
-            with exact_cost_model as m:
-                for i, (incumbent, budget) in enumerate(zip(self.incumbents, self.budgets)):
-                    try:
-                        predicted_losses[i] = m.evaluate(make_config_compatible(incumbent, config_space), budget)
-                    except Exception as e:
-                        print(e)
-                        predicted_losses[i] = float("inf")
-        return self.cost_calculation(predicted_losses).reshape((-1, 1))
-
-    def _train_cost_estimation_model(self, result, config_space):
-        config_generator = BohbConfigGenerator(config_space)
-        X, y = list(), list()
-        id2config = result.get_id2config_mapping()
-        for config_id, config in id2config.items():
-            config = Configuration(config_space, config["config"])
-            runs = result.get_runs_by_id(config_id)
-            runs = [r for r in runs if r.loss is not None]
-            if len(runs) == 0:
-                continue
-            best_run = min(runs, key=lambda run: run.loss)
-            X.append(config.get_array())
-            y.append(best_run.loss)
-        X_list = X
-        y_list = y
-
-        X = np.vstack(X_list * self.num_repeat_imputation)
-        y = np.array(y_list * self.num_repeat_imputation)
-        X = config_generator.impute_conditional_data(X)
-        model = clone(self.cost_estimation_model)
-        model.fit(X, y)
-        print(model.score(config_generator.impute_conditional_data(np.vstack(X_list)), np.array(y_list)))
-
-        return model, config_generator.impute_conditional_data
-
-import Pyro4
-import os
-import pickle
-import traceback
-
-@Pyro4.expose
-class DistributedMap():
-    def __init__(self, run_id, working_dir, master, host):
-        self.run_id = run_id
-        self.working_dir = working_dir
-        self.master = master
-        self.host = host
-
-        self.daemon = None
-        self.uri = None
-        self.results = list()
-        self.iterator_done = False
-
-        self.iterator = None
-        self.func = None
-    
-    def __enter__(self):
-        if self.master:
-            self.old_server_type = Pyro4.config.SERVERTYPE
-            Pyro4.config.SERVERTYPE = "multiplex"
-            self.daemon = Pyro4.Daemon(host=self.host)
-            self.uri = self.daemon.register(self)
-        return self
-    
-    def __exit__(self, error_type, error_value, error_traceback):
-        if self.master:
-            Pyro4.config.SERVERTYPE = self.old_server_type
-        return error_type is not None
-
-
-    def map(self, func, iterator):
-        self.iterator = enumerate(iterator)
-        self.func = func
-
-        print("distributed map called")
-
-        if self.master:
-            return self.start_master()
-        return self.start_worker()
-
-    
-    def start_worker(self):
-        print("start worker")
-        while True:
-            try:
-                with open(os.path.join(self.working_dir, "distributed_map_uri_%s.txt" % self.run_id), "r") as f:
-                    self.uri = f.readline().strip()
-                    print("loaded uri", self.uri)
-                    if self.uri == "shutdown":
-                        return None
-                    master = Pyro4.Proxy(self.uri)
-                    i = master.get_item()
-                    while i is not None:
-                        item = self.get_item_by_idx(i)
-                        print("working on", i)
-                        result = self.func(item)
-                        master.register_result(i, result.tolist())
-                        i = master.get_item()
+                loss = m.evaluate(make_config_compatible(incumbent, config_space), budget)
             except Exception as e:
                 print(e)
-                traceback.print_exc()
-                print("".join(Pyro4.util.getPyroTraceback()))
-                print("Sleeping")
-                time.sleep(30)
+                loss = float("inf")
+        return loss, incumbent_id, dataset_id, budget
 
-    
-    def start_master(self):
-        print("start_master")
-        with open(os.path.join(self.working_dir, "distributed_map_uri_%s.txt" % self.run_id), "w") as f:
-            print(self.uri, file=f)
-
-        self.daemon.requestLoop()
-        print("distributed map finished")
-        return self.results
+    def _get_incumbent(self, i):
+        result = self.results[i]
+        config_space = self.config_spaces[i]
         
-    # WORKER
-    def get_item_by_idx(self, idx):
-        for i, item in self.iterator:
-            if i == idx:
-                return item
-    
-    # MASTER
-    def get_item(self):
-        try:
-            i, item = next(self.iterator)
-            self.results.append("NO_RESULT")
-            print("assigned", i)
-            return i
-        except StopIteration:
-            print("all jobs assigned")
-            self.iterator_done = True
-            with open(os.path.join(self.working_dir, "distributed_map_uri_%s.txt" % self.run_id), "w") as f:
-                print("shutdown", file=f)
-            if self.iterator_done and not any(isinstance(r, str) and r == "NO_RESULT" for r in self.results):
-                self.daemon.shutdown()
-            return None
-    
-    # MASTER
-    def register_result(self, i, result):
-        print("Registered result", i, result)
-        self.results[i] = np.array(result)
-        print("All jobs assigned:", self.iterator_done)
-        print("Waiting for results:", any(isinstance(r, str) and r == "NO_RESULT" for r in self.results))
+        if isinstance(result, str):
+            result = logged_results_to_HBS_result(result)
+        id2config = result.get_id2config_mapping()
+        trajectory = result.get_incumbent_trajectory(bigger_is_better=self.bigger_is_better,
+            non_decreasing_budget=self.bigger_is_better)
 
-        if self.iterator_done and not any(isinstance(r, str) and r == "NO_RESULT" for r in self.results):
-            self.daemon.shutdown()
+        incumbent = id2config[trajectory["config_ids"][-1]]["config"]
+        return Configuration(config_space, incumbent)

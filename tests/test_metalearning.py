@@ -3,7 +3,7 @@ import os
 import ConfigSpace
 import numpy as np
 from hpbandster.metalearning.util import make_config_compatible, make_vector_compatible
-from hpbandster.metalearning.initial_design import Hydra
+from hpbandster.metalearning.initial_design import Hydra, LossMatrixComputation
 from hpbandster.metalearning.model_warmstarting import WarmstartedModelBuilder, WarmstartedModel
 from hpbandster.core.result import logged_results_to_HBS_result
 from sklearn.linear_model import LinearRegression
@@ -60,24 +60,74 @@ class TestMetaLearning(unittest.TestCase):
         self.assertEqual(len(compatible_config.get_dictionary()), 3)
     
     def test_initial_design(self):
+        loss_matrix_computation = LossMatrixComputation()
+        losses = loss_matrix_computation.read_loss(os.path.join(os.path.dirname(os.path.abspath(__file__)), "losses.txt"))[0]
+
         # test train cost estimation model
-        hydra = Hydra(cost_estimation_model=LinearRegression())
+        hydra = Hydra()
+        self.assertEquals(hydra.get_num_configs_per_sh_iter(9, 1, 3), [9, 3, 1])
+        self.assertEquals(hydra.get_num_configs_per_sh_iter(9, 3, 2), [9, 3])
+        self.assertEquals(hydra.get_num_configs_per_sh_iter(27, 3, 3), [27, 9, 3])
+        self.assertEquals(hydra.get_num_configs_per_sh_iter(1, 3, 5), [1, 1, 1, 1, 1])
+
+        cs = ConfigSpace.ConfigurationSpace()
+        cs.add_hyperparameters([
+            ConfigSpace.hyperparameters.UniformFloatHyperparameter("A", lower=0, upper=10)
+        ])
+        incumbent_dict = {"1": ConfigSpace.Configuration(configuration_space=cs, values={"A": 1}),
+                          "2": ConfigSpace.Configuration(configuration_space=cs, values={"A": 2}),
+                          "3": ConfigSpace.Configuration(configuration_space=cs, values={"A": 3}),
+                          "4": ConfigSpace.Configuration(configuration_space=cs, values={"A": 4})}
+        hydra.set_incumbent_losses(losses, incumbent_dict)
+        self.assertEqual(hydra.origins, ["1", "2", "3", "4"])
+        self.assertEqual(list(map(lambda x: x.get_dictionary()["A"], hydra.incumbents)), [1, 2, 3, 4])
+
+        np.testing.assert_almost_equal(hydra.loss_matrices[1],
+            np.array([[0.1, 1.0, 1.0, 0.7],
+                      [0.7, 0.2, 0.5, 0.7],
+                      [0.2, 0.3, 0.2, 0.8],
+                      [0.3, 0.8, 0.4, 0.1]]))
+        np.testing.assert_almost_equal(hydra.loss_matrices[2],
+            np.array([[0.1, 0.1, 0.6, 0.2],
+                      [0.0, 0.1, 0.1, 0.4],
+                      [0.4, 0.5, 0.2, 0.3],
+                      [0.5, 0.5, 0.4, 0.1]]))
+        np.testing.assert_almost_equal(hydra.loss_matrices[4],
+            np.array([[0.0, 0.8, 0.7, 0.2],
+                      [0.0, 0.2, 0.1, 0.8],
+                      [0.1, 0.0, 0.1, 0.2],
+                      [0.6, 0.0, 0.8, 0.0]]))
+        
+        # test _cost
+        self.assertEqual(hydra._cost([0], [1, 1, 1]), 6/4)
+        self.assertEqual(hydra._cost([2], [1, 1, 1]), 5/4)
+        self.assertEqual(hydra._cost([0, 2], [2, 1, 1]), 2/4)
+        self.assertEqual(hydra._cost([0, 2], [2, 2, 1]), 5/4)
+        self.assertEqual(hydra._cost([0, 1, 2, 3], [4, 2, 1]), 3/4)
+        self.assertEqual(hydra._cost([0, 1], [2, 2, 2]), 3/4)
+
+        # test _greedy_step
+        self.assertEqual(hydra._greedy_step([], 1, 3), (2, (5/4)))
+        self.assertEqual(hydra._greedy_step([2], 1, 3), (0, 0.5))
+        self.assertEqual(hydra._greedy_step([0, 2], 1, 3), (3, 0.25))
+
+        # test _learn
+        initial_design = hydra.learn(4, 1, 3)
+        self.assertEqual(initial_design.origins, ["3", "1", "4", "2"])
+        self.assertEqual(list(map(lambda x: x.get_dictionary()["A"], initial_design.configs)), [3, 1, 4, 2])
+        self.assertEqual(initial_design.num_configs_per_sh_iter, [4, 2, 1])
+    
+    def test_loss_matrix_computation(self):
         result1_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result1")
         result2_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result2")
         empty_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "empty_result")
-        result1 = logged_results_to_HBS_result(result1_path)
-        result2 = logged_results_to_HBS_result(result2_path)
+
         cs = ConfigSpace.ConfigurationSpace()
         cs.add_hyperparameters([
             ConfigSpace.hyperparameters.UniformFloatHyperparameter("A", lower=0, upper=10),
             ConfigSpace.hyperparameters.UniformFloatHyperparameter("B", lower=0, upper=10)
         ])
-        model, _ = hydra._train_cost_estimation_model(result1, cs)
-        np.testing.assert_array_almost_equal(model.coef_, np.array([0., -1]))
-        np.testing.assert_almost_equal(model.intercept_, 0.8)
 
-        # test get cost matrix column
-        hydra = Hydra(cost_estimation_model=LinearRegression())
         class ExactCostModel():
             def __init__(self, idx):
                 self.idx = idx
@@ -89,71 +139,30 @@ class TestMetaLearning(unittest.TestCase):
                 return error_type is None
             
             def evaluate(self, incumbent, budget):
-                return abs(8 - incumbent["B"]) if self.idx == 1 else abs(8 - (incumbent["B"] - incumbent["A"]))
-    
-        hydra.incumbents = [ConfigSpace.Configuration(cs, values={"A": 9, "B": 9}),
-                            ConfigSpace.Configuration(cs, values={"A": 0, "B": 10}),
-                            ConfigSpace.Configuration(cs, values={"A": 2, "B": 8})]
-        hydra.budgets = [0, 0, 0]
-        r = hydra._get_cost_matrix_column((0, (result1, cs, None)))
-        np.testing.assert_array_almost_equal(r, np.array([[1], [0], [2]]))
-        r = hydra._get_cost_matrix_column((0, (result1, cs, ExactCostModel(1))))
-        np.testing.assert_array_almost_equal(r, np.array([[1], [2], [0]]))
+                return (abs(8 - incumbent["B"]) if self.idx == 1 else abs(8 - (incumbent["B"] - incumbent["A"])))
 
-        # test get_incumbents
-        hydra = Hydra(cost_estimation_model=LinearRegression())
-        hydra.results = [result1, result2]
-        hydra.config_spaces = [cs, cs, cs]
-        hydra.origins = ["result1", "result2"]
-        hydra._get_incumbents()
-        self.assertEqual(hydra.incumbents, [ConfigSpace.Configuration(cs, values={"A": 2, "B": 8}),
-                                            ConfigSpace.Configuration(cs, values={"A": 2, "B": 10})])
-        self.assertEqual(hydra.budgets, [9.0, 9.0])
 
-        # test get_cost_matrix
-        hydra = Hydra(cost_estimation_model=LinearRegression())
-        hydra.results = [result1, result2]
-        hydra.config_spaces = [cs, cs, cs]
-        hydra.origins = ["result1", "result2"]
-        hydra.exact_cost_models = [None, None, None]
-        r = hydra._get_cost_matrix()
-        np.testing.assert_array_almost_equal(r, np.array([[1, 1], [0, 0]]))
-        hydra.exact_cost_models = [ExactCostModel(1), ExactCostModel(2)]
-        r = hydra._get_cost_matrix()
-        np.testing.assert_array_almost_equal(r, np.array([[0, 1], [1, 0]]))
+        loss_matrix_computation = LossMatrixComputation()
+        self.assertTrue( loss_matrix_computation.add_result(result1_path, cs, "result1", ExactCostModel(1)))
+        self.assertTrue( loss_matrix_computation.add_result(result2_path, cs, "result2", ExactCostModel(2)))
+        self.assertFalse(loss_matrix_computation.add_result(empty_path, cs, "empty", ExactCostModel(0)))
+        self.assertEqual(loss_matrix_computation.results, [result1_path, result2_path])
+        self.assertEqual(loss_matrix_computation.config_spaces, [cs, cs])
+        self.assertEqual(loss_matrix_computation.budgets, [1.0, 3.0, 9.0])
+        self.assertEqual(loss_matrix_computation.origins, ["result1", "result2"])
 
-        # test hydra alg
-        hydra = Hydra(cost_estimation_model=LinearRegression())
-        hydra.incumbents = [0, 1, 2, 3]
-        cost_matrix = np.array([[0.1, 0.8, 0.7, 0.6],
-                                [0.4, 0.0, 0.7, 0.5],
-                                [0.9, 0.3, 0.2, 0.3],
-                                [0.2, 0.9, 0.9, 0.1]])
-        self.assertAlmostEqual(hydra._cost([0], cost_matrix), 2.2 / 4)
-        self.assertAlmostEqual(hydra._cost([1, 2], cost_matrix), 0.9 / 4)
-        self.assertAlmostEqual(hydra._cost([0, 1, 2, 3], cost_matrix), 0.1)
-        self.assertEqual(hydra._greedy_step([], cost_matrix), 1)
-        self.assertEqual(hydra._greedy_step([1], cost_matrix), 2)
-        self.assertEqual(hydra._greedy_step([1, 2], cost_matrix), 3)
-        self.assertEqual(hydra._greedy_step([1, 2, 3], cost_matrix), 0)
+        open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses.txt"), "w").close()
 
-        # learn 
-        hydra = Hydra(cost_estimation_model=LinearRegression())
-        hydra.add_result(empty_path, cs, "empty", None)
-        hydra.add_result(result1_path, cs, "result1", None)
-        hydra.add_result(result2_path, cs, "result2", None)
-        self.assertEqual(list(hydra.learn())[0][0].get_dictionary(), {"A": 2.0, "B": 10.0})
-        self.assertEqual(list(hydra.learn())[1][0].get_dictionary(), {"A": 2.0, "B": 8.0})
+        for i in range(2 * 2 * 3):
+            loss_matrix_computation.write_loss(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses.txt"), i)
 
-        hydra = Hydra(cost_estimation_model=LinearRegression())
-        hydra.add_result(empty_path, cs, "empty", ExactCostModel(1))
-        hydra.add_result(result1_path, cs, "result1", ExactCostModel(1))
-        hydra.add_result(result2_path, cs, "result2", ExactCostModel(2))
-        self.assertEqual(list(hydra.learn())[0][0].get_dictionary(), {"A": 2.0, "B": 8.0})
-        self.assertEqual(list(hydra.learn())[1][0].get_dictionary(), {"A": 2.0, "B": 10.0})
-    
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses.txt"), "r") as f1:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "compare_losses.txt"), "r") as f2:
+                self.assertEqual(f1.readlines() , f2.readlines())
+
+        os.remove(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses.txt"))
+
     def test_model_warmstarting(self):
-        hydra = Hydra(cost_estimation_model=LinearRegression())
         result1_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result1")
         result2_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result2")
         empty_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "empty_result")

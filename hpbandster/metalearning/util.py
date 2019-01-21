@@ -1,5 +1,6 @@
 import ConfigSpace
 import numpy as np
+from hpbandster.optimizers.config_generators.bohb import BOHB as BohbConfigGenerator
 
 def make_config_compatible(config, config_space):
     if isinstance(config, dict):
