@@ -189,7 +189,7 @@ class Master(object):
 		min_n_workers: int
 			minimum number of workers before starting the run
 		"""
-
+		n_iterations -= len(self.iterations)  # in the case of a initial design iteration
 		self.wait_for_workers(min_n_workers)
 		
 		iteration_kwargs.update({'result_logger': self.result_logger})
@@ -217,7 +217,8 @@ class Master(object):
 				continue
 			else:
 				if n_iterations > 0:	#we might be able to start the next iteration
-					self.iterations.append(self.get_next_iteration(len(self.iterations), iteration_kwargs))
+					next_HPB_iter = len(self.iterations) + (self.iterations[0].HPB_iter if len(self.iterations) > 0 else 0)
+					self.iterations.append(self.get_next_iteration(next_HPB_iter, iteration_kwargs))
 					n_iterations -= 1
 					continue
 
@@ -264,7 +265,7 @@ class Master(object):
 
 			if not self.result_logger is None:
 				self.result_logger(job)
-			self.iterations[job.id[0]].register_result(job)
+			self.iterations[job.id[0] - self.iterations[0].HPB_iter].register_result(job)
 			self.config_generator.new_result(job)
 
 			if self.num_running_jobs <= self.job_queue_sizes[0]:
