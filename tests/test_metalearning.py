@@ -3,7 +3,7 @@ import os
 import ConfigSpace
 import numpy as np
 from hpbandster.metalearning.util import make_config_compatible, make_vector_compatible
-from hpbandster.metalearning.initial_design import Hydra, LossMatrixComputation
+from hpbandster.metalearning.initial_design import Hydra, LossMatrixComputation, rank
 from hpbandster.metalearning.model_warmstarting import WarmstartedModelBuilder, WarmstartedModel
 from hpbandster.core.result import logged_results_to_HBS_result
 from sklearn.linear_model import LinearRegression
@@ -67,7 +67,7 @@ class TestMetaLearning(unittest.TestCase):
         losses = loss_matrix_computation.read_loss(os.path.join(os.path.dirname(os.path.abspath(__file__)), "losses.txt"))[0]
 
         # test train cost estimation model
-        hydra = Hydra()
+        hydra = Hydra(normalize_loss=rank)
         self.assertEquals(hydra.get_num_configs_per_sh_iter(9, 1, 3), [9, 3, 1])
         self.assertEquals(hydra.get_num_configs_per_sh_iter(9, 3, 2), [9, 3])
         self.assertEquals(hydra.get_num_configs_per_sh_iter(27, 3, 3), [27, 9, 3])
@@ -101,6 +101,17 @@ class TestMetaLearning(unittest.TestCase):
                       [0.1, 0.0, 0.1, 0.2],
                       [0.6, 0.0, 0.8, 0.0]]))
         
+        # test get_budgets
+        self.assertEqual(hydra.get_budgets(1), [4])
+        self.assertEqual(hydra.get_budgets(2), [2, 4])
+        self.assertEqual(hydra.get_budgets(3), [1, 2, 4])
+
+        # test get_total_budget
+        self.assertEqual(hydra.get_total_budget(27, 3, 3), 27 * 1 + 9 * 2 + 3 * 4)
+        self.assertEqual(hydra.get_total_budget(9, 3, 2), 9 * 2 + 3 * 4)
+        self.assertEqual(hydra.get_total_budget(9, 1, 3), 9 * 1 + 3 * 2 + 1 * 4)
+        self.assertEqual(hydra.get_total_budget(1, 3, 3), 1 * 1 + 1 * 2 + 1 * 4)
+        
         # test _cost
         self.assertEqual(hydra._cost([0], [1, 1, 1]), 6/4)
         self.assertEqual(hydra._cost([2], [1, 1, 1]), 5/4)
@@ -114,11 +125,16 @@ class TestMetaLearning(unittest.TestCase):
         self.assertEqual(hydra._greedy_step([2], 1, 3), (0, 0.5))
         self.assertEqual(hydra._greedy_step([0, 2], 1, 3), (3, 0.25))
 
-        # test _learn
-        initial_design = hydra.learn(4, 1, 3)
-        self.assertEqual(initial_design.origins, ["3", "1", "4", "2"])
-        self.assertEqual(list(map(lambda x: x.get_dictionary()["A"], initial_design.configs)), [3, 1, 4, 2])
-        self.assertEqual(initial_design.num_configs_per_sh_iter, [4, 2, 1])
+        # test learn
+        initial_design, cost = hydra._learn(convergence_threshold=0.3, max_total_budget=50, num_max_budget=1, num_sh_iter=3, max_size=4)
+        self.assertEqual(initial_design.origins, ["3", "1", "4"])
+        self.assertEqual(list(map(lambda x: x.get_dictionary()["A"], initial_design.configs)), [3, 1, 4])
+        self.assertEqual(initial_design.num_configs_per_sh_iter, [3, 1, 1])
+
+        initial_design, cost = hydra.learn(convergence_threshold=0.3, max_total_budget=50)
+        self.assertEqual(initial_design.origins, ["3", "1", "4"])
+        self.assertEqual(list(map(lambda x: x.get_dictionary()["A"], initial_design.configs)), [3, 1, 4])
+        self.assertEqual(initial_design.num_configs_per_sh_iter, [3, 1, 1])
     
     def test_loss_matrix_computation(self):
         result1_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result1")

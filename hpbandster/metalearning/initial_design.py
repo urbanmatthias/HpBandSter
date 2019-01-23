@@ -82,7 +82,7 @@ class Hydra():
             dataset_id = origin_to_id[l["dataset_origin"]]
             self.loss_matrices[l["budget"]][incumbent_id, dataset_id] = l["loss"]
     
-    def learn(self, convergence_threshold, max_total_budget=float("inf"), max_initial_design_size=float("inf")):
+    def learn(self, convergence_threshold, max_total_budget, max_initial_design_size=float("inf")):
         largest_budget = max(self.loss_matrices.keys())
         max_num_max_budget = int(max_total_budget // largest_budget)
         max_num_sh_iter = len(self.loss_matrices)
