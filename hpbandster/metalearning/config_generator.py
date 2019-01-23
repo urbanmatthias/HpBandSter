@@ -34,8 +34,9 @@ class MetaLearningBOHBConfigGenerator(BOHB):
 
             # calculate the sum of likelihoods
             for i, (good_kde, bad_kde, kde_configspace) in enumerate(zip(kdes_good, kdes_bad, kde_configspaces)):
-                train_data_good_compatible = make_vector_compatible(train_data_good, self.configspace, kde_configspace)
-                train_data_bad__compatible  = make_vector_compatible(train_data_bad,  self.configspace, kde_configspace)
+                imputer = BOHB(kde_configspace).impute_conditional_data
+                train_data_good_compatible = make_vector_compatible(train_data_good, self.configspace, kde_configspace, imputer)
+                train_data_bad__compatible  = make_vector_compatible(train_data_bad, self.configspace, kde_configspace, imputer)
 
                 good_kde_likelihoods = np.maximum(np.nan_to_num(good_kde.pdf(train_data_good_compatible)), 0)
                 bad_kde_likelihoods = np.maximum(np.nan_to_num(bad_kde.pdf(train_data_bad__compatible)), 0)

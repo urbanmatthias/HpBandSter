@@ -12,12 +12,13 @@ import multiprocessing as mp
 from NamedAtomicLock import NamedAtomicLock
 
 class InitialDesign():
-    def __init__(self, configs, origins, num_configs_per_sh_iter):
+    def __init__(self, configs, origins, num_configs_per_sh_iter, budgets):
         self.pointer = 0
         self.configs = configs
         self.config_space = None
         self.origins = origins
         self.num_configs_per_sh_iter = num_configs_per_sh_iter
+        self.budgets = budgets
     
     def set_config_space(self, config_space):
         self.config_space = config_space
@@ -25,6 +26,9 @@ class InitialDesign():
     def get_num_configs(self):
         return self.num_configs_per_sh_iter
     
+    def get_total_budget(self):
+        return sum(map(lambda x: x[0] * x[1], zip(self.budgets, self.num_configs_per_sh_iter)))
+
     def __len__(self):
         return len(self.configs)
     
@@ -44,18 +48,19 @@ class InitialDesign():
         return result, origin
 
 
-class InitialDesignLearner():
-    def add_result(self, result, config_space):
-        raise NotImplementedError
-    
-    def learn(self, num_configs=None):
-        raise NotImplementedError
-
 def rank(x):
     return np.argsort(np.argsort(x))
 
-class Hydra(InitialDesignLearner):
-    def __init__(self, normalize_loss=rank, bigger_is_better=True):
+def normalized_distance_to_min(x):
+    maximum = np.max(x[np.isfinite(x)])
+    minimum = np.min(x[np.isfinite(x)])
+    result = (x - minimum) / (maximum - minimum)
+    result[~np.isfinite(result)] = 2
+    return result
+
+
+class Hydra():
+    def __init__(self, normalize_loss=normalized_distance_to_min, bigger_is_better=True):
         self.incumbents = None
         self.origins = None
 
@@ -76,31 +81,83 @@ class Hydra(InitialDesignLearner):
             incumbent_id = origin_to_id[l["incumbent_origin"]]
             dataset_id = origin_to_id[l["dataset_origin"]]
             self.loss_matrices[l["budget"]][incumbent_id, dataset_id] = l["loss"]
+    
+    def learn(self, convergence_threshold, max_total_budget=float("inf"), max_initial_design_size=float("inf")):
+        largest_budget = max(self.loss_matrices.keys())
+        max_num_max_budget = int(max_total_budget // largest_budget)
+        max_num_sh_iter = len(self.loss_matrices)
+        initial_designs = list()
+        costs = list()
 
-    def learn(self, num_min_budget, num_max_budget, max_sh_iter):
+        print("Try single SH-iter")
+        r = self._learn(convergence_threshold, max_total_budget, num_max_budget=max_num_max_budget, num_sh_iter=1, max_size=max_initial_design_size)
+        if r is not None:
+            initial_designs.append(r[0])
+            costs.append(r[1])
+
+        for num_sh_iter in range(2, max_num_sh_iter + 1):
+            for num_max_budget in range(1, max_num_max_budget + 1):
+                print("Try %s SH iterations with %s configurations evaluated at max budget" % (num_sh_iter, num_max_budget))
+                r = self._learn(convergence_threshold, max_total_budget, num_max_budget=num_max_budget, num_sh_iter=num_sh_iter, max_size=max_initial_design_size)
+                if r is not None:
+                    initial_designs.append(r[0])
+                    costs.append(r[1])
+        try:
+            idx = np.argmin([x.get_total_budget() for x in initial_designs])  # return initial design with lowest total budget
+            # idx = np.argmin(costs)  # return initial design with lowest cost
+            return initial_designs[idx], costs[idx]
+        except:
+            return None, None
+
+    def _learn(self, convergence_threshold, max_total_budget, num_max_budget, num_sh_iter, max_size):
         initial_design = []
-        for _ in range(min(num_min_budget, len(self.incumbents))):
-            new_incumbent, cost = self._greedy_step(initial_design, num_max_budget, max_sh_iter)
+        cost = float("inf")
+        for _ in range(len(self.incumbents)):
+            new_incumbent, cost = self._greedy_step(initial_design, num_max_budget, num_sh_iter)
             initial_design.append(new_incumbent)
-            print("Initial Design:", initial_design, "Cost:", cost)
+            print("Initial Design:", list(map(lambda x: self.origins[x], initial_design)), "Cost:", cost, end="\r")
+            if cost <= convergence_threshold:
+                print("\nCost lower than given threshold: Coverged.")
+                break
+            if self.get_total_budget(len(initial_design), num_max_budget, num_sh_iter) > max_total_budget:
+                print("\nTotal budget of initial design larger than given threshold: Failed.")
+                return None
+            if len(initial_design) > max_size:
+                print("\nInitial design is larger than given maximum size. Failed")
+                return None
+        if cost > convergence_threshold:
+            print("\nCould not find initial design with cost lower than given threshold")
+            return None
 
         initial_design_configs = [self.incumbents[i] for i in initial_design]
         initial_design_origins = [self.origins[i] for i in initial_design]
-        num_configs_per_sh_iter = self.get_num_configs_per_sh_iter(len(initial_design), num_max_budget, max_sh_iter)
-        return InitialDesign(initial_design_configs, initial_design_origins, num_configs_per_sh_iter)
+
+        num_configs_per_sh_iter = self.get_num_configs_per_sh_iter(len(initial_design), num_max_budget, num_sh_iter)
+        budgets = self.get_budgets(num_sh_iter)
+        print("Found initial design with cost %s and total budget %s" % (cost, self.get_total_budget(len(initial_design), num_max_budget, num_sh_iter)))
+        return InitialDesign(initial_design_configs, initial_design_origins, num_configs_per_sh_iter, budgets), cost
     
-    def get_num_configs_per_sh_iter(self, num_min_budget, num_max_budget, max_sh_iter):
+    def get_budgets(self, num_sh_iter):
+        return sorted(list(self.loss_matrices.keys()))[-num_sh_iter:]
+    
+    def get_total_budget(self, num_min_budget, num_max_budget, num_sh_iter):
+        ns = self.get_num_configs_per_sh_iter(num_min_budget, num_max_budget, num_sh_iter)
+        budgets = self.get_budgets(num_sh_iter)
+        return sum(map(lambda x: x[0] * x[1], zip(budgets, ns)))
+    
+    def get_num_configs_per_sh_iter(self, num_min_budget, num_max_budget, num_sh_iter):
+        if num_sh_iter <= 1:
+            return [num_min_budget]
         num_max_budget = min(num_min_budget, num_max_budget)
-        s = max_sh_iter - 1
+        s = num_sh_iter - 1
         eta = (num_min_budget / num_max_budget) ** (1 / s)
         n0 = num_min_budget
         ns = [max(int(n0 * (eta ** (-i))), 1) for i in range(s + 1)]
-        print(ns)
         return ns
 
-    def _greedy_step(self, initial_design, num_max_budget, max_sh_iter):
+    def _greedy_step(self, initial_design, num_max_budget, num_sh_iter):
         # check number of configurations per sh iteration to estimate cost
-        num_configs_per_sh_iter = self.get_num_configs_per_sh_iter(len(initial_design) + 1, num_max_budget, max_sh_iter)
+        num_configs_per_sh_iter = self.get_num_configs_per_sh_iter(len(initial_design) + 1, num_max_budget, num_sh_iter)
 
         # return best from available incumbents
         available_incumbents = set(range(len(self.incumbents))) - set(initial_design)
@@ -113,7 +170,7 @@ class Hydra(InitialDesignLearner):
 
     def _cost(self, initial_design, num_configs_per_sh_iter):
         dataset_costs = list()
-        budgets = sorted(list(self.loss_matrices.keys()))
+        budgets = self.get_budgets(len(num_configs_per_sh_iter))
         assert len(budgets) == len(num_configs_per_sh_iter)
 
         # iterate over all datasets
@@ -174,6 +231,10 @@ class LossMatrixComputation():
         self.exact_cost_models.append(exact_cost_model)
         return True
     
+    def get_num_entries(self):
+        assert self.budgets is not None, "Add at least one result first"
+        return len(self.results) * len(self.results) * len(self.budgets)
+    
     def write_loss(self, path, entry):
         loss, incumbent_id, dataset_id, budget = self.compute_cost_matrix_entry(entry)
         incumbent_origin = self.origins[incumbent_id]
@@ -186,7 +247,7 @@ class LossMatrixComputation():
         print("success")
 
         with open(path, "a") as f:
-            print("\t".join(map(str, [loss, incumbent_origin, dataset_origin, budget])), file=f)
+            print("\t".join(map(str, [entry, loss, incumbent_origin, dataset_origin, budget])), file=f)
 
         print("release lock")
         lock.release()
@@ -195,7 +256,7 @@ class LossMatrixComputation():
         losses = list()
         with open(path, "r") as f:
             for line in f:
-                loss, incumbent_origin, dataset_origin, budget = line.split("\t")
+                _, loss, incumbent_origin, dataset_origin, budget = line.split("\t")
                 entry = {
                     "loss": float(loss),
                     "incumbent_origin": incumbent_origin,

@@ -7,6 +7,7 @@ from hpbandster.metalearning.initial_design import Hydra, LossMatrixComputation
 from hpbandster.metalearning.model_warmstarting import WarmstartedModelBuilder, WarmstartedModel
 from hpbandster.core.result import logged_results_to_HBS_result
 from sklearn.linear_model import LinearRegression
+from hpbandster.optimizers.config_generators.bohb import BOHB as BohbConfigGenerator
 
 class TestMetaLearning(unittest.TestCase):
 
@@ -38,7 +39,8 @@ class TestMetaLearning(unittest.TestCase):
         self.assertEqual(len(compatible.get_dictionary()), 2)
 
         vector = config.get_array()
-        compatible_vector = make_vector_compatible(vector, cs1, cs2)
+        imputer = BohbConfigGenerator(cs2).impute_conditional_data
+        compatible_vector = make_vector_compatible(vector, cs1, cs2, imputer)
         compatible_config = ConfigSpace.Configuration(cs2, vector=compatible_vector.reshape((-1, )), allow_inactive_with_values=True)
         compatible_config = ConfigSpace.util.deactivate_inactive_hyperparameters(compatible_config, cs2)
         self.assertEqual(compatible, compatible_config)
@@ -51,7 +53,8 @@ class TestMetaLearning(unittest.TestCase):
         self.assertEqual(len(compatible.get_dictionary()), 3)
 
         vector = config.get_array()
-        compatible_vector = make_vector_compatible(vector, cs2, cs1)
+        imputer = BohbConfigGenerator(cs1).impute_conditional_data
+        compatible_vector = make_vector_compatible(vector, cs2, cs1, imputer)
         compatible_config = ConfigSpace.Configuration(cs1, vector=compatible_vector.reshape((-1, )), allow_inactive_with_values=True)
         compatible_config = ConfigSpace.util.deactivate_inactive_hyperparameters(compatible_config, cs1)
         self.assertTrue("h1" in compatible_config)

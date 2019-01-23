@@ -1,6 +1,5 @@
 import ConfigSpace
 import numpy as np
-from hpbandster.optimizers.config_generators.bohb import BOHB as BohbConfigGenerator
 
 def make_config_compatible(config, config_space):
     if isinstance(config, dict):
@@ -32,7 +31,7 @@ def make_bw_compatible(bw, from_configspace, to_configspace):
             result[j] = bw[i]
     return result
 
-def make_vector_compatible(vector, from_configspace, to_configspace):
+def make_vector_compatible(vector, from_configspace, to_configspace, imputer):
     x = np.array(vector).reshape((-1, len(from_configspace.get_hyperparameters())))
     c = np.zeros((x.shape[0], len(to_configspace.get_hyperparameters()))) * np.nan
 
@@ -41,8 +40,7 @@ def make_vector_compatible(vector, from_configspace, to_configspace):
         j = transform_hyperparameter_index(i, from_configspace, to_configspace)
         if j is not None:
             c[:, j] = transform_hyperparameter(from_configspace, to_configspace, i, j, x[:, i])
-    cg = BohbConfigGenerator(to_configspace)
-    return cg.impute_conditional_data(c)
+    return imputer(c)
 
 def transform_hyperparameter_index(idx, from_configspace, to_configspace):
     hp_name = from_configspace.get_hyperparameter_by_idx(idx)
