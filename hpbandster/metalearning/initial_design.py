@@ -268,11 +268,13 @@ class LossMatrixComputation():
         return losses, incumbents
 
     def compute_cost_matrix_entry(self, entry):
+
         num_matrix_entries = len(self.results) * len(self.results)
         matrix_entry = entry % num_matrix_entries
         incumbent_id = matrix_entry % len(self.results)
         dataset_id = matrix_entry // len(self.results)
 
+        assert (entry // num_matrix_entries) < len(self.budgets), "Given entry is too large"
         budget = self.budgets[entry // num_matrix_entries]
         incumbent = self._get_incumbent(incumbent_id)
         exact_cost_model = self.exact_cost_models[dataset_id]
