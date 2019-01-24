@@ -10,6 +10,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.base import clone
 import multiprocessing as mp
 from NamedAtomicLock import NamedAtomicLock
+import traceback
 
 class InitialDesign():
     def __init__(self, configs, origins, num_configs_per_sh_iter, budgets):
@@ -201,13 +202,14 @@ class Hydra():
 
 
 class LossMatrixComputation():
-    def __init__(self, bigger_is_better=True):
+    def __init__(self, bigger_is_better=True, lock_dir=None):
         self.results = list()
         self.config_spaces = list()
         self.origins = list()
         self.exact_cost_models = list()
         self.bigger_is_better = bigger_is_better
         self.budgets = None
+        self.lock_dir = lock_dir
 
     def add_result(self, result, config_space, origin, exact_cost_model):
         try:
@@ -241,7 +243,7 @@ class LossMatrixComputation():
         dataset_origin = self.origins[dataset_id]
 
         lock_name = path.replace(os.sep, '')
-        lock = NamedAtomicLock(lock_name)
+        lock = NamedAtomicLock(lock_name, lockDir=self.lock_dir)
         print("acquire named lock:", lock_name)
         lock.acquire()
         print("success")
@@ -285,6 +287,7 @@ class LossMatrixComputation():
                 loss = m.evaluate(make_config_compatible(incumbent, config_space), budget)
             except Exception as e:
                 print(e)
+                traceback.print_exc()
                 loss = float("inf")
         return loss, incumbent_id, dataset_id, budget
 
