@@ -172,12 +172,12 @@ class TestMetaLearning(unittest.TestCase):
 
         open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses.txt"), "w").close()
 
-        for i in range(2 * 2 * 3):
-            loss_matrix_computation.write_loss(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses.txt"), i)
+        for i in range(2 * 2):
+            loss_matrix_computation.write_loss(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses.txt"), i + 1)
 
         with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses.txt"), "r") as f1:
             with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "compare_losses.txt"), "r") as f2:
-                self.assertEqual(f1.readlines() , f2.readlines())
+                self.assertEqual(f1.readlines(), f2.readlines())
 
         os.remove(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses.txt"))
 

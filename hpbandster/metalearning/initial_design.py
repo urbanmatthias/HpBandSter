@@ -235,24 +235,25 @@ class LossMatrixComputation():
     
     def get_num_entries(self):
         assert self.budgets is not None, "Add at least one result first"
-        return len(self.results) * len(self.results) * len(self.budgets)
+        return len(self.results) * len(self.results)
     
     def write_loss(self, path, entry):
-        loss, incumbent_id, dataset_id, budget = self.compute_cost_matrix_entry(entry)
+        loss_dict, incumbent_id, dataset_id = self.compute_cost_matrix_entry(entry)
         incumbent_origin = self.origins[incumbent_id]
         dataset_origin = self.origins[dataset_id]
 
-        lock_name = path.replace(os.sep, '')
+        lock_name = ("lock:" + os.path.abspath(path)).replace(os.sep, '')
         lock = NamedAtomicLock(lock_name, lockDir=self.lock_dir)
-        print("acquire named lock:", lock_name)
-        lock.acquire()
-        print("success")
-
-        with open(path, "a") as f:
-            print("\t".join(map(str, [entry, loss, incumbent_origin, dataset_origin, budget])), file=f)
-
-        print("release lock")
-        lock.release()
+        try:
+            print("acquire named lock:", lock_name)
+            lock.acquire()
+            print("success")
+            with open(path, "a") as f:
+                for budget, loss in loss_dict.items():
+                    print("\t".join(map(str, [entry, loss, incumbent_origin, dataset_origin, budget])), file=f)
+        finally:
+            print("release lock")
+            lock.release()
     
     def read_loss(self, path):
         losses = list()
@@ -270,26 +271,28 @@ class LossMatrixComputation():
         return losses, incumbents
 
     def compute_cost_matrix_entry(self, entry):
-
+        assert entry > 0, "entries start with 1"
+        entry -= 1
         num_matrix_entries = len(self.results) * len(self.results)
-        matrix_entry = entry % num_matrix_entries
-        incumbent_id = matrix_entry % len(self.results)
-        dataset_id = matrix_entry // len(self.results)
+        assert entry < num_matrix_entries, "Given entry is too large"
+        incumbent_id = entry % len(self.results)
+        dataset_id = entry // len(self.results)
 
-        assert (entry // num_matrix_entries) < len(self.budgets), "Given entry is too large"
-        budget = self.budgets[entry // num_matrix_entries]
         incumbent = self._get_incumbent(incumbent_id)
         exact_cost_model = self.exact_cost_models[dataset_id]
         config_space = self.config_spaces[dataset_id]
 
-        with exact_cost_model as m:
-            try:
-                loss = m.evaluate(make_config_compatible(incumbent, config_space), budget)
-            except Exception as e:
-                print(e)
-                traceback.print_exc()
-                loss = float("inf")
-        return loss, incumbent_id, dataset_id, budget
+        loss_dict = dict()
+        for budget in self.budgets:
+            with exact_cost_model as m:
+                try:
+                    loss = m.evaluate(make_config_compatible(incumbent, config_space), budget)
+                except Exception as e:
+                    print(e)
+                    traceback.print_exc()
+                    loss = float("inf")
+                loss_dict[budget] = loss
+        return loss_dict, incumbent_id, dataset_id
 
     def _get_incumbent(self, i):
         result = self.results[i]
