@@ -49,7 +49,7 @@ class MetaLearningBOHBConfigGenerator(BOHB):
     
     def get_config(self, *args, **kwargs):
         budget = 0
-        self.warmstarted_model.set_current_config_space(self.configspace)
+        self.warmstarted_model.set_current_config_space(self.configspace, self)
         if len(self.kde_models.keys()) > 0:
             budget = max(self.kde_models.keys())
         self.kde_models[budget + 1] = self.warmstarted_model

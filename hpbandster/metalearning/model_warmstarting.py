@@ -9,86 +9,88 @@ from hpbandster.core.dispatcher import Job
 class WarmstartedModel():
     def __init__(self, good_kdes, bad_kdes, kde_config_spaces, origins):
         assert len(good_kdes) == len(bad_kdes) == len(kde_config_spaces)
-        self.good_kdes = good_kdes
-        self.bad_kdes = bad_kdes
-        self.kde_config_spaces = kde_config_spaces
-        self.origins = origins
-        self.current_config_space = None
-        self.current_good_kdes = list()
-        self.current_bad_kdes = list()
-        self.current_origins = list()
-        self.weights = np.array([1] * len(good_kdes))
-        self.weight_history = dict()
-        self.weight_history["SUM_OF_WEIGHTS"] = list()
+        self._good_kdes = good_kdes
+        self._bad_kdes = bad_kdes
+        self._kde_config_spaces = kde_config_spaces
+        self._origins = origins
+        self._current_config_space = None
+        self._current_config_space_imputer = None
+        self._current_good_kdes = list()
+        self._current_bad_kdes = list()
+        self._current_origins = list()
+        self._weights = np.array([1] * len(good_kdes))
+        self._weight_history = dict()
+        self._weight_history["SUM_OF_WEIGHTS"] = list()
     
     def get_good_kdes(self):
-        return self.good_kdes + self.current_good_kdes
+        return self._good_kdes + self._current_good_kdes
 
     def get_bad_kdes(self):
-        return self.bad_kdes + self.current_bad_kdes
+        return self._bad_kdes + self._current_bad_kdes
     
     def get_kde_configspaces(self):
-        return self.kde_config_spaces + [self.current_config_space] * len(self.current_bad_kdes)
+        return self._kde_config_spaces + [self._current_config_space] * len(self._current_bad_kdes)
     
     def get_origins(self):
-        return self.origins + self.current_origins
+        return self._origins + self._current_origins
     
     def update_weights(self, weights):
         assert np.all(weights >= 0)
 
-        self.weight_history["SUM_OF_WEIGHTS"].append(np.sum(weights))
+        self._weight_history["SUM_OF_WEIGHTS"].append(np.sum(weights))
         for i, origin in enumerate(self.get_origins()):
-            if origin not in self.weight_history:
-                self.weight_history[origin] = [0] * (len(self.weight_history["SUM_OF_WEIGHTS"]) - 1)
-            self.weight_history[origin].append(weights[i])
-        self.weights = weights
+            if origin not in self._weight_history:
+                self._weight_history[origin] = [0] * (len(self._weight_history["SUM_OF_WEIGHTS"]) - 1)
+            self._weight_history[origin].append(weights[i])
+        self._weights = weights
     
     def print_weight_history(self, file=sys.stdout):
-        history_of_sum = np.array(self.weight_history["SUM_OF_WEIGHTS"])
-        print("History of sum of weights:", ", ".join(map(str,self.weight_history["SUM_OF_WEIGHTS"])), file=file)
+        history_of_sum = np.array(self._weight_history["SUM_OF_WEIGHTS"])
+        print("History of sum of weights:", ", ".join(map(str,self._weight_history["SUM_OF_WEIGHTS"])), file=file)
         print("Normalized weight history:", file=file)
-        for origin, history in self.weight_history.items():
+        for origin, history in self._weight_history.items():
             if origin == "SUM_OF_WEIGHTS":
                 continue
             history = np.array(history) / history_of_sum
             print(origin, ":", ", ".join(map(str, history)), file=file)
     
-    def set_current_config_space(self, current_config_space):
-        self.current_config_space = current_config_space
+    def set_current_config_space(self, current_config_space, config_generator):
+        self._current_config_space = current_config_space
+        self._current_config_space_imputer = config_generator.impute_conditional_data
     
     def set_current_kdes(self, kdes):
-        self.current_good_kdes.extend([kde["good"] for budget, kde in sorted(kdes.items())])
-        self.current_bad_kdes.extend([kde["bad"] for budget, kde in sorted(kdes.items())])
-        self.current_origins.extend(["current:" + str(b) for b in sorted(kdes.keys())])
-    
+        self._current_good_kdes = [kde["good"] for budget, kde in sorted(kdes.items())]
+        self._current_bad_kdes = [kde["bad"] for budget, kde in sorted(kdes.items())]
+        self._current_origins = ["current:" + str(b) for b in sorted(kdes.keys())]
+
     def pdf(self, kdes, vector):
         pdf_values = np.zeros(len(kdes))
         for i, (kde, kde_config_space) in enumerate(zip(kdes, self.get_kde_configspaces())):
-            pdf_value = kde.pdf(make_vector_compatible(vector, self.current_config_space, kde_config_space))
+            imputer = BohbConfigGenerator(kde_config_space).impute_conditional_data
+            pdf_value = kde.pdf(make_vector_compatible(vector, self._current_config_space, kde_config_space, imputer))
             if np.isfinite(pdf_value):
                 pdf_values[i] = max(0, pdf_value)
-        return np.sum(pdf_values * self.weights) / np.sum(self.weights)
+        return np.sum(pdf_values * self._weights) / np.sum(self._weights)
     
     def __getitem__(self, good_or_bad):
         good = good_or_bad == "good"
         kdes = self.get_good_kdes() if good else self.get_bad_kdes()
-        i = np.random.choice(len(kdes), p=self.weights/np.sum(self.weights))
+        i = np.random.choice(len(kdes), p=self._weights/np.sum(self._weights))
         metalearning_kde = namedtuple("metalearning_kde", ["bw", "data", "pdf"])
         return metalearning_kde(
-            bw=make_bw_compatible(kdes[i].bw, self.get_kde_configspaces()[i], self.current_config_space),
-            data=make_vector_compatible(kdes[i].data, self.get_kde_configspaces()[i], self.current_config_space),
+            bw=make_bw_compatible(kdes[i].bw, self.get_kde_configspaces()[i], self._current_config_space),
+            data=make_vector_compatible(kdes[i].data, self.get_kde_configspaces()[i],
+                self._current_config_space, self._current_config_space_imputer),
             pdf=lambda vector: self.pdf(kdes, vector)
         )
 
 class WarmstartedModelBuilder():
-    def __init__(self, distributed=False, master=True):
+    def __init__(self):
         self.results = list()
         self.config_spaces = list()
         self.kde_config_spaces = list()
         self.origins = list()
         self.origins_with_budget = list()
-        self.distributed = distributed
-        self.master = master
     
     def add_result(self, result, config_space, origin):
         try:
@@ -105,8 +107,6 @@ class WarmstartedModelBuilder():
         return True
     
     def build(self):
-        if self.distributed and not self.master:
-            return None
         good_kdes = list()
         bad_kdes = list()
         for i, (result, config_space, origin) in enumerate(zip(self.results, self.config_spaces, self.origins)):
