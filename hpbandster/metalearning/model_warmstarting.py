@@ -21,6 +21,7 @@ class WarmstartedModel():
         self._weights = np.array([1] * len(good_kdes))
         self._weight_history = dict()
         self._weight_history["SUM_OF_WEIGHTS"] = list()
+        self.normalize_pdf = False
     
     def get_good_kdes(self):
         return self._good_kdes + self._current_good_kdes
@@ -65,13 +66,24 @@ class WarmstartedModel():
 
     def pdf(self, kdes, vector):
         pdf_values = np.zeros(len(kdes))
+        # iterate over all kdes
         for i, (kde, kde_config_space) in enumerate(zip(kdes, self.get_kde_configspaces())):
+            
+            # only query those with positive weight
+            if self._weights[i] <= 0:
+                continue
+
+            # query KDE
             imputer = BohbConfigGenerator(kde_config_space).impute_conditional_data
             pdf_value = kde.pdf(make_vector_compatible(vector, self._current_config_space, kde_config_space, imputer))
             if np.isfinite(pdf_value):
                 pdf_values[i] = max(0, pdf_value)
-        return np.sum(pdf_values * self._weights) / np.sum(self._weights)
-    
+        
+        # weighting of pdf values
+        if self.normalize_pdf:
+            return np.sum(pdf_values * self._weights) / np.sum(self._weights)
+        return np.sum(pdf_values * self._weights)
+
     def __getitem__(self, good_or_bad):
         good = good_or_bad == "good"
         kdes = self.get_good_kdes() if good else self.get_bad_kdes()
@@ -83,6 +95,16 @@ class WarmstartedModel():
                 self._current_config_space, self._current_config_space_imputer),
             pdf=lambda vector: self.pdf(kdes, vector)
         )
+    
+    def clean(self):
+        self._current_config_space = None
+        self._current_config_space_imputer = None
+        self._current_good_kdes = list()
+        self._current_bad_kdes = list()
+        self._current_origins = list()
+        self._weights = np.array([1] * len(self._good_kdes))
+        self._weight_history = dict()
+        self._weight_history["SUM_OF_WEIGHTS"] = list()
 
 class WarmstartedModelBuilder():
     def __init__(self):
