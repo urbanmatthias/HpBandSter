@@ -35,6 +35,9 @@ class WarmstartedModel():
     def get_origins(self):
         return self._origins + self._current_origins
     
+    def is_current_kde(self, i):
+        return i >= len(self._good_kdes)
+    
     def update_weights(self, weights):
         assert np.all(weights >= 0)
 

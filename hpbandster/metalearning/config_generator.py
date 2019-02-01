@@ -3,6 +3,7 @@ from hpbandster.metalearning.util import make_vector_compatible
 import ConfigSpace
 import numpy as np
 import math
+from statsmodels.nonparametric.kernel_density import gpke, _adjust_shape, KDEMultivariate
 
 class MetaLearningBOHBConfigGenerator(BOHB):
     def __init__(self, warmstarted_model, *args, **kwargs):
@@ -50,12 +51,18 @@ class MetaLearningBOHBConfigGenerator(BOHB):
 
         # calculate the sum of likelihoods
         for i, (good_kde, bad_kde, kde_configspace) in enumerate(zip(kdes_good, kdes_bad, kde_configspaces)):
-            imputer = BOHB(kde_configspace).impute_conditional_data
-            train_data_good_compatible = make_vector_compatible(train_data_good, self.configspace, kde_configspace, imputer)
-            train_data_bad__compatible  = make_vector_compatible(train_data_bad, self.configspace, kde_configspace, imputer)
+            train_data_good_compatible = train_data_good
+            train_data_bad_compatible = train_data_bad
 
-            good_kde_likelihoods = np.maximum(np.nan_to_num(good_kde.pdf(train_data_good_compatible)), 0)
-            bad_kde_likelihoods = np.maximum(np.nan_to_num(bad_kde.pdf(train_data_bad__compatible)), 0)
+            pdf = leave_given_out_pdf
+            if not self.warmstarted_model.is_current_kde(i):
+                imputer = BOHB(kde_configspace).impute_conditional_data
+                train_data_good_compatible = make_vector_compatible(train_data_good, self.configspace, kde_configspace, imputer)
+                train_data_bad_compatible  = make_vector_compatible(train_data_bad, self.configspace, kde_configspace, imputer)
+                pdf = KDEMultivariate.pdf
+
+            good_kde_likelihoods = np.maximum(np.nan_to_num(pdf(good_kde, train_data_good_compatible)), 0)
+            bad_kde_likelihoods = np.maximum(np.nan_to_num(pdf(bad_kde, train_data_bad_compatible)), 0)
 
             likelihood = np.sum(good_kde_likelihoods) + np.sum(bad_kde_likelihoods)
             weights[i] += likelihood
@@ -81,3 +88,17 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         result = super().get_config(*args, **kwargs)
         del self.kde_models[budget + 1]
         return result
+
+def leave_given_out_pdf(kde, data_predict):
+    data_predict = _adjust_shape(data_predict, kde.k_vars)
+
+    pdf_est = []
+    for i in range(np.shape(data_predict)[0]):
+        data = kde.data[np.sum(np.abs(kde.data - data_predict[i, :]), axis=1) != 0]
+
+        pdf_est.append(gpke(kde.bw, data=data,
+                            data_predict=data_predict[i, :],
+                            var_type=kde.var_type) / kde.nobs)
+
+    pdf_est = np.squeeze(pdf_est)
+    return pdf_est
