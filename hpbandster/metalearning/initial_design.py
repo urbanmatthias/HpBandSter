@@ -237,10 +237,16 @@ class LossMatrixComputation():
         assert self.budgets is not None, "Add at least one result first"
         return len(self.results) * len(self.results)
     
-    def write_loss(self, path, entry):
+    def write_loss(self, directory, entry, num_files=1):
+        try:
+            os.mkdir(directory)
+        except:
+            pass
+
         loss_dict, incumbent_id, dataset_id = self.compute_cost_matrix_entry(entry)
         incumbent_origin = self.origins[incumbent_id]
         dataset_origin = self.origins[dataset_id]
+        path = os.path.join(directory, "loss_matrix_%s.txt" % (entry % num_files))
 
         lock_name = ("lock:" + os.path.abspath(path)).replace(os.sep, '')
         lock = NamedAtomicLock(lock_name, lockDir=self.lock_dir)
@@ -255,18 +261,22 @@ class LossMatrixComputation():
             print("release lock")
             lock.release()
     
-    def read_loss(self, path):
+    def read_loss(self, directory):
+        assert os.path.exists(directory)
+        files = next(os.walk(directory))[2]
+        paths = [os.path.join(directory, f) for f in files if f.startswith("loss_matrix")]
         losses = list()
-        with open(path, "r") as f:
-            for line in f:
-                _, loss, incumbent_origin, dataset_origin, budget = line.split("\t")
-                entry = {
-                    "loss": float(loss),
-                    "incumbent_origin": incumbent_origin,
-                    "dataset_origin": dataset_origin,
-                    "budget": float(budget)
-                }
-                losses.append(entry)
+        for path in paths:
+            with open(path, "r") as f:
+                for line in f:
+                    _, loss, incumbent_origin, dataset_origin, budget = line.split("\t")
+                    entry = {
+                        "loss": float(loss),
+                        "incumbent_origin": incumbent_origin,
+                        "dataset_origin": dataset_origin,
+                        "budget": float(budget)
+                    }
+                    losses.append(entry)
         incumbents = {self.origins[i]: self._get_incumbent(i) for i in range(len(self.origins))}
         return losses, incumbents
 

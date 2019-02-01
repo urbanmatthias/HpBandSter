@@ -2,6 +2,7 @@ import unittest
 import os
 import ConfigSpace
 import numpy as np
+import shutil
 from hpbandster.metalearning.util import make_config_compatible, make_vector_compatible
 from hpbandster.metalearning.initial_design import Hydra, LossMatrixComputation, rank
 from hpbandster.metalearning.model_warmstarting import WarmstartedModelBuilder, WarmstartedModel
@@ -64,7 +65,7 @@ class TestMetaLearning(unittest.TestCase):
     
     def test_initial_design(self):
         loss_matrix_computation = LossMatrixComputation()
-        losses = loss_matrix_computation.read_loss(os.path.join(os.path.dirname(os.path.abspath(__file__)), "losses.txt"))[0]
+        losses = loss_matrix_computation.read_loss(os.path.join(os.path.dirname(os.path.abspath(__file__))))[0]
 
         # test train cost estimation model
         hydra = Hydra(normalize_loss=rank)
@@ -170,16 +171,17 @@ class TestMetaLearning(unittest.TestCase):
         self.assertEqual(loss_matrix_computation.budgets, [1.0, 3.0, 9.0])
         self.assertEqual(loss_matrix_computation.origins, ["result1", "result2"])
 
-        open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses.txt"), "w").close()
+        if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses")):
+            shutil.rmtree(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses"))
 
         for i in range(2 * 2):
-            loss_matrix_computation.write_loss(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses.txt"), i + 1)
+            loss_matrix_computation.write_loss(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses"), i + 1, 1)
 
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses.txt"), "r") as f1:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses", "loss_matrix_0.txt"), "r") as f1:
             with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "compare_losses.txt"), "r") as f2:
                 self.assertEqual(f1.readlines(), f2.readlines())
 
-        os.remove(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses.txt"))
+        shutil.rmtree(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses"))
 
     def test_model_warmstarting(self):
         result1_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result1")
@@ -207,6 +209,6 @@ class TestMetaLearning(unittest.TestCase):
         builder.add_result(result1, cs, "result1")
         builder.add_result(result2, cs, "result2")
         r = builder.build()
-        self.assertEqual(len(r.good_kdes), 2)
-        self.assertEqual(len(r.bad_kdes), 2)
-        self.assertEqual(len(r.kde_config_spaces), 2)
+        self.assertEqual(len(r._good_kdes), 2)
+        self.assertEqual(len(r._bad_kdes), 2)
+        self.assertEqual(len(r._kde_config_spaces), 2)
