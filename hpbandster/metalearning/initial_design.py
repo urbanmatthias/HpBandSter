@@ -243,22 +243,24 @@ class LossMatrixComputation():
         except:
             pass
 
+        print("start computing loss matrix_entry", time.time())
         loss_dict, incumbent_id, dataset_id = self.compute_cost_matrix_entry(entry)
         incumbent_origin = self.origins[incumbent_id]
         dataset_origin = self.origins[dataset_id]
         path = os.path.join(directory, "loss_matrix_%s.txt" % (entry % num_files))
+        print("done computing loss_matrix_entry", time.time())
 
         lock_name = ("lock:" + os.path.abspath(path)).replace(os.sep, '')
         lock = NamedAtomicLock(lock_name, lockDir=self.lock_dir)
         try:
-            print("acquire named lock:", lock_name)
+            print("acquire named lock:", lock_name, time.time())
             lock.acquire()
-            print("success")
+            print("success", time.time())
             with open(path, "a") as f:
                 for budget, loss in loss_dict.items():
                     print("\t".join(map(str, [entry, loss, incumbent_origin, dataset_origin, budget])), file=f)
         finally:
-            print("release lock")
+            print("release lock", time.time())
             lock.release()
     
     def read_loss(self, directory):
