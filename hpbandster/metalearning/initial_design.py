@@ -294,8 +294,10 @@ class LossMatrixComputation():
         exact_cost_model = self.exact_cost_models[dataset_id]
         config_space = self.config_spaces[dataset_id]
 
+        print("Start compting loss matrix entry", time.time())
         loss_dict = dict()
         for budget in self.budgets:
+            print("Start compting loss matrix entry for budget", budget, time.time())
             with exact_cost_model as m:
                 try:
                     loss = m.evaluate(make_config_compatible(incumbent, config_space), budget)
@@ -304,6 +306,7 @@ class LossMatrixComputation():
                     traceback.print_exc()
                     loss = float("inf")
                 loss_dict[budget] = loss
+            print("Done compting loss matrix entry for budget", time.time())
         return loss_dict, incumbent_id, dataset_id
 
     def _get_incumbent(self, i):
