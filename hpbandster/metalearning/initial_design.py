@@ -8,7 +8,6 @@ from ConfigSpace import Configuration
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.base import clone
-import multiprocessing as mp
 from NamedAtomicLock import NamedAtomicLock
 import traceback
 
@@ -74,7 +73,7 @@ class Hydra():
         self.origins = sorted(list(incumbent_dict.keys()))
         self.incumbents = [incumbent_dict[origin] for origin in self.origins]
         budgets = set(map(lambda x:x["budget"], losses))
-        self.loss_matrices = {b: np.zeros((len(self.origins), len(self.origins))) for b in budgets}
+        self.loss_matrices = {b: (np.ones((len(self.origins), len(self.origins))) * float("inf")) for b in budgets}
 
         origin_to_id = {origin: i for i, origin in enumerate(self.origins)}
 
