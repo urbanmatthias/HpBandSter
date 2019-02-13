@@ -262,6 +262,19 @@ class LossMatrixComputation():
             print("release lock", time.time())
             lock.release()
     
+    def missing_loss_matrix_entries(self, directory):
+        assert os.path.exists(directory)
+        files = next(os.walk(directory))[2]
+        paths = [os.path.join(directory, f) for f in files if f.startswith("loss_matrix")]
+        num_matrix_entries = len(self.results) * len(self.results)
+        num_budgets_for_entry = np.zeros((num_matrix_entries, ))
+        for path in paths:
+            with open(path, "r") as f:
+                for line in f:
+                    i, _, _, _, _ = line.split("\t")
+                    num_budgets_for_entry[i] += 1
+        return np.where(num_budgets_for_entry != len(self.budgets))
+
     def read_loss(self, directory):
         assert os.path.exists(directory)
         files = next(os.walk(directory))[2]
