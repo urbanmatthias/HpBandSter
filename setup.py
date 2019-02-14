@@ -14,6 +14,7 @@ setup(
 	install_requires=['Pyro4', 'serpent', 'ConfigSpace', 'numpy','statsmodels', 'scipy', 'netifaces'],
 	extras_require = {
 		'docu': ['sphinx', 'sphinx_rtd_theme', 'sphinx_gallery'],
+		'metalearning': ['pymongo']
 	},
 	keywords=['distributed', 'optimization', 'multifidelity'],
 )

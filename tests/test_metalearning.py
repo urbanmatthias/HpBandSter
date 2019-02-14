@@ -65,7 +65,9 @@ class TestMetaLearning(unittest.TestCase):
     
     def test_initial_design(self):
         loss_matrix_computation = LossMatrixComputation()
-        losses = loss_matrix_computation.read_loss(os.path.join(os.path.dirname(os.path.abspath(__file__))))[0]
+        loss_matrix_computation.loss_matrix_from_dir_to_mongo(os.path.dirname(os.path.abspath(__file__)),
+            "test_loss_matrix", None, None)
+        losses = loss_matrix_computation.read_loss("test_loss_matrix", None, None)[0]
 
         # test train cost estimation model
         hydra = Hydra(normalize_loss=rank)
@@ -136,6 +138,7 @@ class TestMetaLearning(unittest.TestCase):
         self.assertEqual(initial_design.origins, ["3", "1", "4"])
         self.assertEqual(list(map(lambda x: x.get_dictionary()["A"], initial_design.configs)), [3, 1, 4])
         self.assertEqual(initial_design.num_configs_per_sh_iter, [3, 1, 1])
+        loss_matrix_computation.delete_collection("test_loss_matrix", None, None)
     
     def test_loss_matrix_computation(self):
         result1_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result1")
@@ -171,17 +174,19 @@ class TestMetaLearning(unittest.TestCase):
         self.assertEqual(loss_matrix_computation.budgets, [1.0, 3.0, 9.0])
         self.assertEqual(loss_matrix_computation.origins, ["result1", "result2"])
 
-        if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses")):
-            shutil.rmtree(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses"))
-
         for i in range(2 * 2):
-            loss_matrix_computation.write_loss(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses"), i + 1, 1)
+            loss_matrix_computation.write_loss("test_loss_matrix", None, None, i + 1)
 
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses", "loss_matrix_0.txt"), "r") as f1:
-            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "compare_losses.txt"), "r") as f2:
-                self.assertEqual(f1.readlines(), f2.readlines())
-
-        shutil.rmtree(os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_losses"))
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "compare_losses.txt"), "r") as f:
+            from pymongo import MongoClient
+            with MongoClient() as client:
+                db = client.loss_matrix
+                collection = db.test_loss_matrix
+                for i, (line, db_entry) in enumerate(zip(f, collection.find({}))):
+                    self.assertEqual(line.strip(), "\t".join(map(lambda x: str(db_entry[x]),
+                        ["entry", "loss", "incumbent_origin", "dataset_origin", "budget"])))
+                self.assertEqual(i, 11)
+        loss_matrix_computation.delete_collection("test_loss_matrix", None, None)
 
     def test_model_warmstarting(self):
         result1_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_result1")

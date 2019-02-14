@@ -8,7 +8,6 @@ from ConfigSpace import Configuration
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.base import clone
-from NamedAtomicLock import NamedAtomicLock
 import traceback
 
 class InitialDesign():
@@ -236,61 +235,52 @@ class LossMatrixComputation():
         assert self.budgets is not None, "Add at least one result first"
         return len(self.results) * len(self.results)
     
-    def write_loss(self, directory, entry, num_files=1):
-        try:
-            os.mkdir(directory)
-        except:
-            pass
-
+    def write_loss(self, collection_name, db_host, db_port, entry):
         print("start computing loss matrix_entry", time.time())
         loss_dict, incumbent_id, dataset_id = self.compute_cost_matrix_entry(entry)
         incumbent_origin = self.origins[incumbent_id]
         dataset_origin = self.origins[dataset_id]
-        path = os.path.join(directory, "loss_matrix_%s.txt" % (entry % num_files))
-        print("done computing loss_matrix_entry", time.time())
+        print("done computing loss_matrix_entry, start writing into db", time.time())
 
-        lock_name = ("lock:" + os.path.abspath(path)).replace(os.sep, '')
-        lock = NamedAtomicLock(lock_name, lockDir=self.lock_dir)
-        try:
-            print("acquire named lock:", lock_name, time.time())
-            lock.acquire()
-            print("success", time.time())
-            with open(path, "a") as f:
-                for budget, loss in loss_dict.items():
-                    print("\t".join(map(str, [entry, loss, incumbent_origin, dataset_origin, budget])), file=f)
-        finally:
-            print("release lock", time.time())
-            lock.release()
+        entries = []
+        for budget, loss in loss_dict.items():
+            entries.append({
+                "entry": int(entry),
+                "loss": float(loss),
+                "incumbent_origin": incumbent_origin,
+                "dataset_origin": dataset_origin,
+                "budget": float(budget)})
+
+        from pymongo import MongoClient
+        with MongoClient(host=db_host, port=db_port) as client:
+            db = client.loss_matrix
+            loss_matrix = db[collection_name]
+            loss_matrix.insert_many(entries)
+        print("done writing into db", time.time())
     
-    def missing_loss_matrix_entries(self, directory):
-        assert os.path.exists(directory)
-        files = next(os.walk(directory))[2]
-        paths = [os.path.join(directory, f) for f in files if f.startswith("loss_matrix")]
+    def missing_loss_matrix_entries(self, collection_name, db_host, db_port):
         num_matrix_entries = len(self.results) * len(self.results)
         num_budgets_for_entry = np.zeros((num_matrix_entries, ))
-        for path in paths:
-            with open(path, "r") as f:
-                for line in f:
-                    i, _, _, _, _ = line.split("\t")
-                    num_budgets_for_entry[i] += 1
+
+        from pymongo import MongoClient
+        with MongoClient(host=db_host, port=db_port) as client:
+            db = client.loss_matrix
+            loss_matrix = db[collection_name]
+            
+            for entry in loss_matrix.find({}):
+                num_budgets_for_entry[entry["entry"]] += 1
         return np.where(num_budgets_for_entry != len(self.budgets))
 
-    def read_loss(self, directory):
-        assert os.path.exists(directory)
-        files = next(os.walk(directory))[2]
-        paths = [os.path.join(directory, f) for f in files if f.startswith("loss_matrix")]
+    def read_loss(self, collection_name, db_host, db_port):
         losses = list()
-        for path in paths:
-            with open(path, "r") as f:
-                for line in f:
-                    _, loss, incumbent_origin, dataset_origin, budget = line.split("\t")
-                    entry = {
-                        "loss": float(loss),
-                        "incumbent_origin": incumbent_origin,
-                        "dataset_origin": dataset_origin,
-                        "budget": float(budget)
-                    }
-                    losses.append(entry)
+
+        from pymongo import MongoClient
+        with MongoClient(host=db_host, port=db_port) as client:
+            db = client.loss_matrix
+            loss_matrix = db[collection_name]
+            
+            for entry in loss_matrix.find({}):
+                losses.append(entry)
         incumbents = {self.origins[i]: self._get_incumbent(i) for i in range(len(self.origins))}
         return losses, incumbents
 
@@ -333,3 +323,34 @@ class LossMatrixComputation():
 
         incumbent = id2config[trajectory["config_ids"][-1]]["config"]
         return Configuration(config_space, incumbent)
+
+    @staticmethod
+    def loss_matrix_from_dir_to_mongo(directory, collection_name, db_host, db_port):
+        assert os.path.exists(directory)
+        files = next(os.walk(directory))[2]
+        paths = [os.path.join(directory, f) for f in files if f.startswith("loss_matrix")]
+        entries = list()
+        for path in paths:
+            with open(path, "r") as f:
+                for line in f:
+                    entry, loss, incumbent_origin, dataset_origin, budget = line.split("\t")
+                    entries.append({
+                        "entry": int(entry),
+                        "loss": float(loss),
+                        "incumbent_origin": incumbent_origin,
+                        "dataset_origin": dataset_origin,
+                        "budget": float(budget)
+                    })
+
+        from pymongo import MongoClient
+        with MongoClient(host=db_host, port=db_port) as client:
+            db = client.loss_matrix
+            loss_matrix = db[collection_name]
+            loss_matrix.insert_many(entries)
+    
+    @staticmethod
+    def delete_collection(collection_name, db_host, db_port):
+        from pymongo import MongoClient
+        with MongoClient(host=db_host, port=db_port) as client:
+            db = client.loss_matrix
+            db.drop_collection(collection_name)
