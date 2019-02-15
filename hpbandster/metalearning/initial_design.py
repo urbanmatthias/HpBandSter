@@ -200,14 +200,13 @@ class Hydra():
 
 
 class LossMatrixComputation():
-    def __init__(self, bigger_is_better=True, lock_dir=None):
+    def __init__(self, bigger_is_better=True):
         self.results = list()
         self.config_spaces = list()
         self.origins = list()
         self.exact_cost_models = list()
         self.bigger_is_better = bigger_is_better
         self.budgets = None
-        self.lock_dir = lock_dir
 
     def add_result(self, result, config_space, origin, exact_cost_model):
         try:
@@ -235,7 +234,7 @@ class LossMatrixComputation():
         assert self.budgets is not None, "Add at least one result first"
         return len(self.results) * len(self.results)
     
-    def write_loss(self, collection_name, db_host, db_port, entry):
+    def write_loss(self, collection_name, db_config, entry):
         print("start computing loss matrix_entry", time.time())
         loss_dict, incumbent_id, dataset_id = self.compute_cost_matrix_entry(entry)
         incumbent_origin = self.origins[incumbent_id]
@@ -252,18 +251,18 @@ class LossMatrixComputation():
                 "budget": float(budget)})
 
         from pymongo import MongoClient
-        with MongoClient(host=db_host, port=db_port) as client:
+        with MongoClient(**db_config) as client:
             db = client.loss_matrix
             loss_matrix = db[collection_name]
             loss_matrix.insert_many(entries)
         print("done writing into db", time.time())
     
-    def missing_loss_matrix_entries(self, collection_name, db_host, db_port):
+    def missing_loss_matrix_entries(self, collection_name, db_config):
         num_matrix_entries = len(self.results) * len(self.results)
         num_budgets_for_entry = np.zeros((num_matrix_entries, ))
 
         from pymongo import MongoClient
-        with MongoClient(host=db_host, port=db_port) as client:
+        with MongoClient(**db_config) as client:
             db = client.loss_matrix
             loss_matrix = db[collection_name]
             
@@ -271,11 +270,11 @@ class LossMatrixComputation():
                 num_budgets_for_entry[entry["entry"]] += 1
         return np.where(num_budgets_for_entry != len(self.budgets))
 
-    def read_loss(self, collection_name, db_host, db_port):
+    def read_loss(self, collection_name, db_config):
         losses = list()
 
         from pymongo import MongoClient
-        with MongoClient(host=db_host, port=db_port) as client:
+        with MongoClient(**db_config) as client:
             db = client.loss_matrix
             loss_matrix = db[collection_name]
             
@@ -325,7 +324,7 @@ class LossMatrixComputation():
         return Configuration(config_space, incumbent)
 
     @staticmethod
-    def loss_matrix_from_dir_to_mongo(directory, collection_name, db_host, db_port):
+    def loss_matrix_from_dir_to_mongo(directory, collection_name, db_config):
         assert os.path.exists(directory)
         files = next(os.walk(directory))[2]
         paths = [os.path.join(directory, f) for f in files if f.startswith("loss_matrix")]
@@ -343,14 +342,14 @@ class LossMatrixComputation():
                     })
 
         from pymongo import MongoClient
-        with MongoClient(host=db_host, port=db_port) as client:
+        with MongoClient(**db_config) as client:
             db = client.loss_matrix
             loss_matrix = db[collection_name]
             loss_matrix.insert_many(entries)
     
     @staticmethod
-    def delete_collection(collection_name, db_host, db_port):
+    def delete_collection(collection_name, db_config):
         from pymongo import MongoClient
-        with MongoClient(host=db_host, port=db_port) as client:
+        with MongoClient(**db_config) as client:
             db = client.loss_matrix
             db.drop_collection(collection_name)
