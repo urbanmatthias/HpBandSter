@@ -267,7 +267,7 @@ class LossMatrixComputation():
             loss_matrix = db[collection_name]
             
             for entry in loss_matrix.find({}):
-                num_budgets_for_entry[entry["entry"]] += 1
+                num_budgets_for_entry[entry["entry"] - 1] += 1
         return np.where(num_budgets_for_entry != len(self.budgets))[0]
 
     def read_loss(self, collection_name, db_config):
