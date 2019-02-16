@@ -51,6 +51,8 @@ def rank(x):
     return np.argsort(np.argsort(x))
 
 def normalized_distance_to_min(x):
+    if not np.any(np.isfinite(x)):
+        return np.zeros_like(x)
     maximum = np.max(x[np.isfinite(x)])
     minimum = np.min(x[np.isfinite(x)])
     result = (x - minimum) / (maximum - minimum)
