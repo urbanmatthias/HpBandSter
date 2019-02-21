@@ -21,7 +21,7 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         # save for each config a loss value: either loss evaluated on heighest budget or best loss observed so far
         budget = job.kwargs["budget"]
         config = ConfigSpace.Configuration(configuration_space=self.configspace, values=job.kwargs["config"])
-        loss = job.result["loss"]
+        loss = job.result["loss"] if (job.result is not None and "loss" in job.result) else float("inf")
         max_budget = max(self.configs.keys())
 
         if max_budget != previous_max_budget and self.bigger_budget_is_better:
