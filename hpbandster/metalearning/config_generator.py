@@ -36,7 +36,7 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         kde_configspaces = self.warmstarted_model.get_kde_configspaces()
 
         # calculate weights
-        weights = np.zeros(len(kdes_good), dtype=float)
+        loglikelihoods = np.zeros(len(kdes_good), dtype=float)
         train_configs = list(self.config_to_loss.keys())
         train_losses = np.array(list(map(lambda c:self.config_to_loss[c], train_configs)))
         train_configs = np.array(list(map(ConfigSpace.Configuration.get_array, train_configs)))
@@ -61,12 +61,14 @@ class MetaLearningBOHBConfigGenerator(BOHB):
                 train_data_bad_compatible  = make_vector_compatible(train_data_bad, self.configspace, kde_configspace, imputer)
                 pdf = KDEMultivariate.pdf
 
-            good_kde_likelihoods = np.maximum(np.nan_to_num(pdf(good_kde, train_data_good_compatible)), 0)
-            bad_kde_likelihoods = np.maximum(np.nan_to_num(pdf(bad_kde, train_data_bad_compatible)), 0)
+            good_kde_likelihoods = np.maximum(np.nan_to_num(pdf(good_kde, train_data_good_compatible)), 2e-32)
+            bad_kde_likelihoods = np.maximum(np.nan_to_num(pdf(bad_kde, train_data_bad_compatible)), 2e-32)
 
-            likelihood = np.sum(good_kde_likelihoods) + np.sum(bad_kde_likelihoods)
-            weights[i] += likelihood
+            loglikelihood = np.sum(np.log(np.append(good_kde_likelihoods, bad_kde_likelihoods)))
+            loglikelihoods[i] += loglikelihood
         
+        weights = np.exp(loglikelihoods - np.max(loglikelihoods))
+
         # if all weights are zero, all models are equally likely
         if np.sum(weights) == 0 and not self.num_nonzero_weight:
             weights = np.ones(len(kdes_good))
