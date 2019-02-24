@@ -150,7 +150,7 @@ class BOHB(Master):
 		num_max_budget = min(self.initial_design_num_max_budget, len(initial_design))
 		# number of 'SH rungs'
 		ns = initial_design.get_num_configs()[-len(self.budgets):]
-		iteration = SuccessiveHalving(HPB_iter=-1, num_configs=ns, budgets=self.budgets[-len(ns):], config_sampler=None, logger=self.logger, result_logger=self.result_logger)	
+		iteration = SuccessiveHalving(HPB_iter=-1, num_configs=ns, budgets=self.budgets[-len(ns):], config_sampler=self.config_generator.get_config, logger=self.logger, result_logger=self.result_logger)	
 		for i, (config, origin) in zip(range(ns[0]), initial_design):
 			iteration.add_configuration(config.get_dictionary(), {"model_based_pick": "initial design:" + origin})
 		return iteration

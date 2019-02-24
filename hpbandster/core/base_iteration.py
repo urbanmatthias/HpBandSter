@@ -23,7 +23,7 @@ class Datum(object):
 			"\nconfig:{}\n".format(self.config) + \
 			"config_info:\n{}\n"%self.config_info + \
 			"losses:\n"
-			'\t'.join(["{}: {}\t".format(k, v['loss']) for k,v in self.results.items()]) + \
+			'\t'.join(["{}: {}\t".format(k, v['loss'] if v is not None else None) for k,v in self.results.items()]) + \
 			"time stamps: {}".format(self.time_stamps)
 		)
 
