@@ -61,8 +61,8 @@ class MetaLearningBOHBConfigGenerator(BOHB):
                 train_data_bad_compatible  = make_vector_compatible(train_data_bad, self.configspace, kde_configspace, imputer)
                 pdf = KDEMultivariate.pdf
 
-            good_kde_likelihoods = np.maximum(np.nan_to_num(pdf(good_kde, train_data_good_compatible)), 2e-32)
-            bad_kde_likelihoods = np.maximum(np.nan_to_num(pdf(bad_kde, train_data_bad_compatible)), 2e-32)
+            good_kde_likelihoods = np.maximum(np.nan_to_num(pdf(good_kde, train_data_good_compatible)), 1e-32)
+            bad_kde_likelihoods = np.maximum(np.nan_to_num(pdf(bad_kde, train_data_bad_compatible)), 1e-32)
 
             loglikelihood = np.sum(np.log(np.append(good_kde_likelihoods, bad_kde_likelihoods)))
             loglikelihoods[i] += loglikelihood
