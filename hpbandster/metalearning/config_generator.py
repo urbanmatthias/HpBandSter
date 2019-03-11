@@ -6,14 +6,14 @@ import math
 from statsmodels.nonparametric.kernel_density import gpke, _adjust_shape, KDEMultivariate
 
 class MetaLearningBOHBConfigGenerator(BOHB):
-    def __init__(self, warmstarted_model, *args, **kwargs):
+    def __init__(self, warmstarted_model, bigger_budget_is_better, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.warmstarted_model = warmstarted_model
         self.warmstarted_model.clean()
-        self.bigger_budget_is_better = True
+        self.bigger_budget_is_better = bigger_budget_is_better
         self.config_to_loss = dict()
-        self.num_nonzero_weight = False
-        # self.num_nonzero_weight = 15
+        # self.num_nonzero_weight = False
+        self.num_nonzero_weight = 50
 
     def new_result(self, job, *args, **kwargs):
         previous_max_budget = max(self.configs.keys()) if self.configs else 0
@@ -37,7 +37,7 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         kde_configspaces = self.warmstarted_model.get_kde_configspaces()
 
         # calculate weights
-        loglikelihoods = np.zeros(len(kdes_good), dtype=float)
+        likelihood_sums = np.zeros(len(kdes_good), dtype=float)
         train_configs = list(self.config_to_loss.keys())
         train_losses = np.array(list(map(lambda c:self.config_to_loss[c], train_configs)))
         train_configs = np.array(list(map(ConfigSpace.Configuration.get_array, train_configs)))
@@ -65,10 +65,10 @@ class MetaLearningBOHBConfigGenerator(BOHB):
             good_kde_likelihoods = np.maximum(np.nan_to_num(pdf(good_kde, train_data_good_compatible)), 1e-32)
             bad_kde_likelihoods = np.maximum(np.nan_to_num(pdf(bad_kde, train_data_bad_compatible)), 1e-32)
 
-            loglikelihood = np.sum(np.log(np.append(good_kde_likelihoods, bad_kde_likelihoods)))
-            loglikelihoods[i] += loglikelihood
+            likelihood_sum = np.sum(np.append(good_kde_likelihoods, bad_kde_likelihoods))
+            likelihood_sums[i] += likelihood_sum
         
-        weights = np.exp(loglikelihoods - np.max(loglikelihoods))
+        weights = likelihood_sums
 
         # if all weights are zero, all models are equally likely
         if np.sum(weights) == 0 and not self.num_nonzero_weight:

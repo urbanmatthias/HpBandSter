@@ -19,8 +19,8 @@ class BOHB(Master):
 					eta=3, min_budget=0.01, max_budget=1,
 					min_points_in_model = None,	top_n_percent=15,
 					num_samples = 64, random_fraction=1/3, bandwidth_factor=3,
-					min_bandwidth=1e-3, initial_design_num_max_budget=3,
-					warmstarted_model=None,
+					min_bandwidth=1e-3,
+					warmstarted_model=None, bigger_budget_is_better=True,
 					**kwargs ):
 		"""
                 BOHB performs robust and efficient hyperparameter optimization
@@ -84,7 +84,7 @@ class BOHB(Master):
 
 
 		cg_class = CG_BOHB if warmstarted_model is None else MetaLearningBOHBConfigGenerator
-		cg_kwargs = dict() if warmstarted_model is None else {"warmstarted_model": warmstarted_model}
+		cg_kwargs = dict() if warmstarted_model is None else {"warmstarted_model": warmstarted_model, "bigger_budget_is_better": bigger_budget_is_better}
 		cg = cg_class( configspace = configspace,
 					min_points_in_model = min_points_in_model,
 					top_n_percent=top_n_percent,
@@ -94,8 +94,6 @@ class BOHB(Master):
 					min_bandwidth = min_bandwidth,
 					**cg_kwargs
 					)
-
-		self.initial_design_num_max_budget = initial_design_num_max_budget
 
 		# Hyperband related stuff
 		self.eta = eta
@@ -147,7 +145,6 @@ class BOHB(Master):
 		return(SuccessiveHalving(HPB_iter=iteration, num_configs=ns, budgets=self.budgets[(-s-1):], config_sampler=self.config_generator.get_config, **iteration_kwargs))
 
 	def get_initial_design_iteration(self, initial_design):
-		num_max_budget = min(self.initial_design_num_max_budget, len(initial_design))
 		# number of 'SH rungs'
 		ns = initial_design.get_num_configs()[-len(self.budgets):]
 		iteration = SuccessiveHalving(HPB_iter=-1, num_configs=ns, budgets=self.budgets[-len(ns):], config_sampler=self.config_generator.get_config, logger=self.logger, result_logger=self.result_logger)	

@@ -121,7 +121,7 @@ class WarmstartedModelBuilder():
         try:
             if isinstance(result, str):
                 result = logged_results_to_HBS_result(result)
-            result.get_incumbent_trajectory(bigger_is_better=False, non_decreasing_budget=False)
+            result.get_incumbent_trajectory()
         except:
             print("Did not add empty result")
             return False
