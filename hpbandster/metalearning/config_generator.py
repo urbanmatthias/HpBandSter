@@ -71,13 +71,13 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         weights = likelihood_sums
 
         # if all weights are zero, all models are equally likely
-        if np.sum(weights) == 0 and not self.num_nonzero_weight:
-            weights = np.ones(len(kdes_good))
+        if np.sum(weights) == 0 and (not self.num_nonzero_weight or len(kdes_good) < self.num_nonzero_weight):
+            weights = np.ones(len(kdes_good)) / len(kdes_good)
 
         # only num_nonzero_weight should have positive weight
         elif np.sum(weights) == 0:
             weights = np.zeros(len(kdes_good))
-            weights[np.random.choice(np.array(list(range(len(kdes_good)))), size=self.num_nonzero_weight, replace=False)] = 1
+            weights[np.random.choice(np.array(list(range(len(kdes_good)))), size=self.num_nonzero_weight, replace=False)] = 1 / self.num_nonzero_weight
         elif self.num_nonzero_weight:
             weights[np.argsort(weights)[:-self.num_nonzero_weight]] = 0
         self.warmstarted_model.update_weights(weights)
