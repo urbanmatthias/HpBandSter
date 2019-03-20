@@ -15,25 +15,42 @@ class WarmstartedModel():
         self._origins = origins
         self._current_config_space = None
         self._current_config_space_imputer = None
-        self._current_good_kdes = list()
-        self._current_bad_kdes = list()
-        self._current_origins = list()
+        self._current_good_kdes = dict()
+        self._current_bad_kdes = dict()
         self._weights = np.array([1] * len(good_kdes))
         self._weight_history = dict()
         self._weight_history["SUM_OF_WEIGHTS"] = list()
         self.normalize_pdf = False
+        self.sample_budget = None
     
-    def get_good_kdes(self):
-        return self._good_kdes + self._current_good_kdes
+    def get_max_budget(self):
+        return max(self._good_kdes[0].keys())
 
-    def get_bad_kdes(self):
-        return self._bad_kdes + self._current_bad_kdes
+    def get_min_budget(self):
+        return min(self._good_kdes[0].keys())
+
+    def get_good_kdes(self, budget):
+        result =  list(map(lambda x: x[budget], self._good_kdes))
+        if budget in self._current_good_kdes:
+            result.append(self._current_good_kdes[budget])
+        elif self._current_good_kdes:
+            result.append(max(self._current_good_kdes.items())[1])
+        return result
+
+    def get_bad_kdes(self, budget):
+        result =  list(map(lambda x: x[budget], self._bad_kdes))
+        if budget in self._current_bad_kdes:
+            result.append(self._current_bad_kdes[budget])
+        elif self._current_bad_kdes:
+            result.append(max(self._current_bad_kdes.items())[1])
+        return result
     
     def get_kde_configspaces(self):
-        return self._kde_config_spaces + [self._current_config_space] * len(self._current_bad_kdes)
+        return self._kde_config_spaces + \
+            ([self._current_config_space] if self._current_good_kdes else [])
     
     def get_origins(self):
-        return self._origins + self._current_origins
+        return self._origins + (["current"] if self._current_good_kdes else [])
     
     def is_current_kde(self, i):
         return i >= len(self._good_kdes)
@@ -42,11 +59,12 @@ class WarmstartedModel():
         assert np.all(weights >= 0)
 
         self._weight_history["SUM_OF_WEIGHTS"].append(np.sum(weights))
+        self._weights = weights
+    
         for i, origin in enumerate(self.get_origins()):
             if origin not in self._weight_history:
                 self._weight_history[origin] = [0] * (len(self._weight_history["SUM_OF_WEIGHTS"]) - 1)
             self._weight_history[origin].append(weights[i])
-        self._weights = weights
     
     def print_weight_history(self, file=sys.stdout):
         history_of_sum = np.array(self._weight_history["SUM_OF_WEIGHTS"])
@@ -63,9 +81,8 @@ class WarmstartedModel():
         self._current_config_space_imputer = config_generator.impute_conditional_data
     
     def set_current_kdes(self, kdes):
-        self._current_good_kdes = [kde["good"] for budget, kde in sorted(kdes.items())]
-        self._current_bad_kdes = [kde["bad"] for budget, kde in sorted(kdes.items())]
-        self._current_origins = ["current:" + str(b) for b in sorted(kdes.keys())]
+        self._current_good_kdes = {budget: kde["good"] for budget, kde in kdes.items()}
+        self._current_bad_kdes = {budget: kde["bad"] for budget, kde in kdes.items()}
 
     def pdf(self, kdes, vector):
         pdf_values = np.zeros(len(kdes))
@@ -89,7 +106,7 @@ class WarmstartedModel():
 
     def __getitem__(self, good_or_bad):
         good = good_or_bad == "good"
-        kdes = self.get_good_kdes() if good else self.get_bad_kdes()
+        kdes = self.get_good_kdes(self.sample_budget) if good else self.get_bad_kdes(self.sample_budget)
         i = np.random.choice(len(kdes), p=self._weights/np.sum(self._weights))
         metalearning_kde = namedtuple("metalearning_kde", ["bw", "data", "pdf"])
         return metalearning_kde(
@@ -102,9 +119,8 @@ class WarmstartedModel():
     def clean(self):
         self._current_config_space = None
         self._current_config_space_imputer = None
-        self._current_good_kdes = list()
-        self._current_bad_kdes = list()
-        self._current_origins = list()
+        self._current_good_kdes = dict()
+        self._current_bad_kdes = dict()
         self._weights = np.array([1] * len(self._good_kdes))
         self._weight_history = dict()
         self._weight_history["SUM_OF_WEIGHTS"] = list()
@@ -115,7 +131,6 @@ class WarmstartedModelBuilder():
         self.config_spaces = list()
         self.kde_config_spaces = list()
         self.origins = list()
-        self.origins_with_budget = list()
     
     def add_result(self, result, config_space, origin):
         try:
@@ -142,11 +157,10 @@ class WarmstartedModelBuilder():
                 except:
                     continue
             good, bad, budgets = self.train_kde(result, config_space)
-            good_kdes.extend(good)
-            bad_kdes.extend(bad)
-            self.kde_config_spaces.extend([config_space] * len(good))
-            self.origins_with_budget.extend([origin + ":" + str(b) for b in budgets])
-        return WarmstartedModel(good_kdes, bad_kdes, self.kde_config_spaces, self.origins_with_budget)
+            good_kdes.append(dict(zip(budgets, good)))
+            bad_kdes.append(dict(zip(budgets, bad)))
+            self.kde_config_spaces.append(config_space)
+        return WarmstartedModel(good_kdes, bad_kdes, self.kde_config_spaces, self.origins)
     
     def train_kde(self, result, config_space):
         cg = BohbConfigGenerator(config_space)
