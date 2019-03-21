@@ -27,7 +27,7 @@ class MetaLearningBOHBConfigGenerator(BOHB):
             self.observations[config] = list()
         self.observations[config].append((budget, loss))
     
-    def get_config(self, *args, **kwargs):
+    def get_config(self, budget, *args, **kwargs):
         max_budget_with_model = self.warmstarted_model.get_min_budget()
         if self.kde_models:
             max_budget_with_model = max(self.kde_models.keys())
@@ -35,7 +35,7 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         # prepare model
         self.warmstarted_model.set_current_config_space(self.configspace, self)
         self.warmstarted_model.sample_budget = self.warmstarted_model.get_max_budget()
-        max
+
         self.update_warmstarted_model_weights(
             select_observation_strategy=FilterObservations(max_budget_with_model, self),
             select_kde_budget=max_budget_with_model
@@ -43,7 +43,7 @@ class MetaLearningBOHBConfigGenerator(BOHB):
 
         # impute model
         self.kde_models[max_budget_with_model + 1] = self.warmstarted_model
-        result = super().get_config(*args, **kwargs)
+        result = super().get_config(budget=budget, *args, **kwargs)
         del self.kde_models[max_budget_with_model + 1]
         return result
     
@@ -78,13 +78,17 @@ class MetaLearningBOHBConfigGenerator(BOHB):
 
     def _get_weights(self, train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces):
         # iterate over kdes
-        likelihood_sums = np.zeros(len(kdes_good), dtype=float)
+        combine_likelihoods = np.sum
+        transform_likelihoods = lambda x: x
+        # transform_likelihoods = np.log
+
+        likelihoods = np.zeros(len(kdes_good), dtype=float)
         for i, (good_kde, bad_kde, kde_configspace) in enumerate(zip(kdes_good, kdes_bad, kde_configspaces)):
             train_data_good_compatible = train_data_good
             train_data_bad_compatible = train_data_bad
 
             # compute likelihood of kde given observation
-            pdf = pdf = KDEMultivariate.pdf  # leave_given_out_pdf
+            pdf = KDEMultivariate.pdf # leave_given_out_pdf
             if not self.warmstarted_model.is_current_kde(i):
                 imputer = BOHB(kde_configspace).impute_conditional_data
                 train_data_good_compatible = make_vector_compatible(train_data_good, self.configspace, kde_configspace, imputer)
@@ -94,17 +98,20 @@ class MetaLearningBOHBConfigGenerator(BOHB):
             good_kde_likelihoods = np.maximum(np.nan_to_num(pdf(good_kde, train_data_good_compatible)), 1e-32)
             bad_kde_likelihoods = np.maximum(np.nan_to_num(pdf(bad_kde, train_data_bad_compatible)), 1e-32)
 
-            likelihood_sum = np.sum(np.append(good_kde_likelihoods, bad_kde_likelihoods))
-            likelihood_sums[i] += likelihood_sum
+            likelihoods[i] = combine_likelihoods(transform_likelihoods(np.append(good_kde_likelihoods, bad_kde_likelihoods)))
 
-        return self._likelihoods_to_weights(likelihood_sums, len(kdes_good))
+        return self._likelihoods_to_weights(likelihoods, len(kdes_good))
 
     def _likelihoods_to_weights(self, likelihoods, num_weights):
-        weights = likelihoods
+        retransform_likelihoods = lambda x: x
+        # retransform_likelihoods = lambda x: np.exp(x + np.max(x))
+        # retransform_likelihoods = lambda x: (x - np.min(x)) / (np.max(x) - np.min(x)) if np.max(x) > np.min(x) else 0
+
+        weights = retransform_likelihoods(likelihoods)
 
         # if all weights are zero, all models are equally likely
         if np.sum(weights) == 0 and (not self.num_nonzero_weight or num_weights < self.num_nonzero_weight):
-            weights = np.ones(num_weights / num_weights)
+            weights = np.ones(num_weights) / num_weights
 
         # only num_nonzero_weight should have positive weight
         elif np.sum(weights) == 0:
