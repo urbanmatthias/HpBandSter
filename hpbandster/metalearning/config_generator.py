@@ -6,11 +6,10 @@ import math
 from statsmodels.nonparametric.kernel_density import gpke, _adjust_shape, KDEMultivariate
 
 class MetaLearningBOHBConfigGenerator(BOHB):
-    def __init__(self, warmstarted_model, bigger_budget_is_better, *args, **kwargs):
+    def __init__(self, warmstarted_model, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.warmstarted_model = warmstarted_model
         self.warmstarted_model.clean()
-        self.bigger_budget_is_better = bigger_budget_is_better
         self.observations = dict()
         # self.num_nonzero_weight = False
         self.num_nonzero_weight = 15
@@ -32,13 +31,16 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         if self.kde_models:
             max_budget_with_model = max(self.kde_models.keys())
 
+        similarity_budget = budget if self.warmstarted_model.choose_similarity_budget_strategy == "current" else max_budget_with_model
+        sample_budget = budget if self.warmstarted_model.choose_sample_budget_strategy == "current" else self.warmstarted_model.get_max_budget()
+
         # prepare model
         self.warmstarted_model.set_current_config_space(self.configspace, self)
-        self.warmstarted_model.sample_budget = self.warmstarted_model.get_max_budget()
+        self.warmstarted_model.sample_budget = sample_budget
 
         self.update_warmstarted_model_weights(
-            select_observation_strategy=FilterObservations(max_budget_with_model, self),
-            select_kde_budget=max_budget_with_model
+            select_observation_strategy=FilterObservations(similarity_budget, self),
+            select_kde_budget=similarity_budget
         )
 
         # impute model

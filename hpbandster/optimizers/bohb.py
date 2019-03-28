@@ -20,7 +20,7 @@ class BOHB(Master):
 					min_points_in_model = None,	top_n_percent=15,
 					num_samples = 64, random_fraction=1/3, bandwidth_factor=3,
 					min_bandwidth=1e-3,
-					warmstarted_model=None, bigger_budget_is_better=True,
+					warmstarted_model=None,
 					**kwargs ):
 		"""
                 BOHB performs robust and efficient hyperparameter optimization
@@ -84,7 +84,7 @@ class BOHB(Master):
 
 
 		cg_class = CG_BOHB if warmstarted_model is None else MetaLearningBOHBConfigGenerator
-		cg_kwargs = dict() if warmstarted_model is None else {"warmstarted_model": warmstarted_model, "bigger_budget_is_better": bigger_budget_is_better}
+		cg_kwargs = dict() if warmstarted_model is None else {"warmstarted_model": warmstarted_model}
 		cg = cg_class( configspace = configspace,
 					min_points_in_model = min_points_in_model,
 					top_n_percent=top_n_percent,

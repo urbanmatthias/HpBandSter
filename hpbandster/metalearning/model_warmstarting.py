@@ -22,6 +22,8 @@ class WarmstartedModel():
         self._weight_history["SUM_OF_WEIGHTS"] = list()
         self.normalize_pdf = False
         self.sample_budget = None
+        self.choose_sample_budget_strategy = "max_available"  # alternative: current
+        self.choose_similarity_budget_strategy = "max_with_model"  # alternative: current
     
     def get_max_budget(self):
         return max(self._good_kdes[0].keys())
