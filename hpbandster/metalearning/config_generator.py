@@ -12,13 +12,14 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         self.warmstarted_model.clean()
         self.observations = dict()
         self.weights = None
+        self.learning_rate = 1
+        self.num_steps = 1
         # self.num_nonzero_weight = False
         self.num_nonzero_weight = 15
 
     def new_result(self, job, *args, **kwargs):
         super().new_result(job, *args, **kwargs)
 
-        # save for each config a loss value: either loss evaluated on heighest budget or best loss observed so far
         budget = job.kwargs["budget"]
         config = ConfigSpace.Configuration(configuration_space=self.configspace, values=job.kwargs["config"])
         loss = job.result["loss"] if (job.result is not None and "loss" in job.result) else float("inf")
@@ -32,8 +33,11 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         if self.kde_models:
             max_budget_with_model = max(self.kde_models.keys())
 
-        similarity_budget = budget if self.warmstarted_model.choose_similarity_budget_strategy == "current" else max_budget_with_model
-        sample_budget = budget if self.warmstarted_model.choose_sample_budget_strategy == "current" else self.warmstarted_model.get_max_budget()
+        similarity_budget = sample_budget = budget
+        if self.warmstarted_model.choose_similarity_budget_strategy == "max_with_model" or budget > max_budget_with_model:
+            similarity_budget = max_budget_with_model
+        if self.warmstarted_model.choose_sample_budget_strategy == "max_available":
+            sample_budget = self.warmstarted_model.get_max_budget()
 
         # prepare model
         self.warmstarted_model.set_current_config_space(self.configspace, self)
@@ -82,8 +86,11 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         elif len(kdes_good) != self.weights.shape[0]:
             self.weights = np.sum(self._get_likelihood_matrix(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces), axis=0)
         else:
-            gradient = self._get_weight_gradient(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces)
-            self.weights = self.weights + gradient
+            for i in range(self.num_steps):
+                gradient = self._get_weight_gradient(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces)
+                self.weights = self.weights + gradient * self.learning_rate
+                self.weights = np.maximum(self.weights, 0)
+                self.weights = self.weights / np.sum(self.weights)
         self.weights = np.maximum(self.weights, 0)
         self.weights = self.weights / np.sum(self.weights)
         self._set_weights(len(kdes_good))
