@@ -11,6 +11,7 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         self.warmstarted_model = warmstarted_model
         self.warmstarted_model.clean()
         self.observations = dict()
+        self.weights = None
         # self.num_nonzero_weight = False
         self.num_nonzero_weight = 15
 
@@ -73,18 +74,28 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         train_data_good = self.impute_conditional_data(train_configs[idx[:n_good]])
         train_data_bad  = self.impute_conditional_data(train_configs[idx[n_good:n_good+n_bad]])
 
-        # update the weights
-        self.warmstarted_model.update_weights(
-            self._get_weights(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces)
-        )
+        self._update_weights(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces)
+    
+    def _update_weights(self, train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces):
+        if self.weights is None or train_data_good.shape[0] + train_data_bad.shape[0] == 0:
+            self.weights = np.ones(len(kdes_good))
+        elif len(kdes_good) != self.weights.shape[0]:
+            self.weights = np.sum(self._get_likelihood_matrix(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces), axis=0)
+        else:
+            gradient = self._get_weight_gradient(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces)
+            self.weights = self.weights + gradient
+        self.weights = np.maximum(self.weights, 0)
+        self.weights = self.weights / np.sum(self.weights)
+        self._set_weights(len(kdes_good))
 
-    def _get_weights(self, train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces):
-        # iterate over kdes
-        combine_likelihoods = np.sum
-        transform_likelihoods = lambda x: x
-        # transform_likelihoods = np.log
-
-        likelihoods = np.zeros(len(kdes_good), dtype=float)
+    def _get_weight_gradient(self, train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces):
+        matrix = self._get_likelihood_matrix(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces)
+        sum_over_models = np.sum(matrix, axis=1).reshape((-1, 1))
+        gradient = np.sum(matrix / sum_over_models, axis=0)
+        return gradient
+    
+    def _get_likelihood_matrix(self, train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces):  # datapoints x models
+        likelihood_matrix = np.empty((train_data_good.shape[0] + train_data_bad.shape[0], len(kdes_good)))
         for i, (good_kde, bad_kde, kde_configspace) in enumerate(zip(kdes_good, kdes_bad, kde_configspaces)):
             train_data_good_compatible = train_data_good
             train_data_bad_compatible = train_data_bad
@@ -97,31 +108,25 @@ class MetaLearningBOHBConfigGenerator(BOHB):
                 train_data_bad_compatible  = make_vector_compatible(train_data_bad, self.configspace, kde_configspace, imputer)
                 pdf = KDEMultivariate.pdf
 
-            good_kde_likelihoods = np.maximum(np.nan_to_num(pdf(good_kde, train_data_good_compatible)), 1e-32)
-            bad_kde_likelihoods = np.maximum(np.nan_to_num(pdf(bad_kde, train_data_bad_compatible)), 1e-32)
+            good_kde_likelihoods = np.nan_to_num(pdf(good_kde, train_data_good_compatible))
+            bad_kde_likelihoods = np.nan_to_num(pdf(bad_kde, train_data_bad_compatible))
+            likelihood_matrix[:, i] = np.append(good_kde_likelihoods, bad_kde_likelihoods)
+        return likelihood_matrix
 
-            likelihoods[i] = combine_likelihoods(transform_likelihoods(np.append(good_kde_likelihoods, bad_kde_likelihoods)))
-
-        return self._likelihoods_to_weights(likelihoods, len(kdes_good))
-
-    def _likelihoods_to_weights(self, likelihoods, num_weights):
-        retransform_likelihoods = lambda x: x
-        # retransform_likelihoods = lambda x: np.exp(x + np.max(x))
-        # retransform_likelihoods = lambda x: (x - np.min(x)) / (np.max(x) - np.min(x)) if np.max(x) > np.min(x) else 0
-
-        weights = retransform_likelihoods(likelihoods)
-
+    def _set_weights(self, num_kdes):
+        weights = self.weights
         # if all weights are zero, all models are equally likely
-        if np.sum(weights) == 0 and (not self.num_nonzero_weight or num_weights < self.num_nonzero_weight):
-            weights = np.ones(num_weights) / num_weights
-
+        if np.sum(weights) == 0 and (not self.num_nonzero_weight or num_kdes < self.num_nonzero_weight):
+            weights = np.ones(num_kdes)
         # only num_nonzero_weight should have positive weight
         elif np.sum(weights) == 0:
-            weights = np.zeros(num_weights)
-            weights[np.random.choice(np.array(list(range(num_weights))), size=self.num_nonzero_weight, replace=False)] = 1 / self.num_nonzero_weight
+            weights = np.zeros(num_kdes)
+            weights[np.random.choice(np.array(list(range(num_kdes))), size=self.num_nonzero_weight, replace=False)] = 1
         elif self.num_nonzero_weight:
             weights[np.argsort(weights)[:-self.num_nonzero_weight]] = 0
-        return weights
+        
+        weights = weights / np.sum(weights)
+        self.warmstarted_model.update_weights(weights)
 
 
 # def leave_given_out_pdf(kde, data_predict):

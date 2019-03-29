@@ -17,10 +17,8 @@ class WarmstartedModel():
         self._current_config_space_imputer = None
         self._current_good_kdes = dict()
         self._current_bad_kdes = dict()
-        self._weights = np.array([1] * len(good_kdes))
+        self._weights = None
         self._weight_history = dict()
-        self._weight_history["SUM_OF_WEIGHTS"] = list()
-        self.normalize_pdf = False
         self.sample_budget = None
         self.choose_sample_budget_strategy = "max_available"  # alternative: current
         self.choose_similarity_budget_strategy = "max_with_model"  # alternative: current
@@ -59,24 +57,25 @@ class WarmstartedModel():
     
     def update_weights(self, weights):
         assert np.all(weights >= 0)
+        assert np.isclose(np.sum(weights), 1)
+        assert len(weights) == len(self.get_good_kdes(self.sample_budget))
 
-        self._weight_history["SUM_OF_WEIGHTS"].append(np.sum(weights))
-        self._weights = weights
-    
+        self._weights = weights  
         for i, origin in enumerate(self.get_origins()):
             if origin not in self._weight_history:
-                self._weight_history[origin] = [0] * (len(self._weight_history["SUM_OF_WEIGHTS"]) - 1)
+                self._weight_history[origin] = list()
             self._weight_history[origin].append(weights[i])
     
     def print_weight_history(self, file=sys.stdout):
-        history_of_sum = np.array(self._weight_history["SUM_OF_WEIGHTS"])
-        print("History of sum of weights:", ", ".join(map(str,self._weight_history["SUM_OF_WEIGHTS"])), file=file)
-        print("Normalized weight history:", file=file)
         for origin, history in self._weight_history.items():
-            if origin == "SUM_OF_WEIGHTS":
+            if origin == "current":
                 continue
-            history = np.array(history) / history_of_sum
-            print(origin, ":", ", ".join(map(str, history)), file=file)
+            len_history = len(history)
+            history = np.array(history)
+            print(origin, "\t", ", ".join(map(str, history)), file=file)
+
+        history = np.array(([0] * (len_history - len(self._weight_history["current"]))) + self._weight_history["current"])
+        print("current", "\t", ", ".join(map(str, history)), file=file)
     
     def set_current_config_space(self, current_config_space, config_generator):
         self._current_config_space = current_config_space
@@ -102,14 +101,12 @@ class WarmstartedModel():
                 pdf_values[i] = max(0, pdf_value)
         
         # weighting of pdf values
-        if self.normalize_pdf:
-            return np.sum(pdf_values * self._weights) / np.sum(self._weights)
         return np.sum(pdf_values * self._weights)
 
     def __getitem__(self, good_or_bad):
         good = good_or_bad == "good"
         kdes = self.get_good_kdes(self.sample_budget) if good else self.get_bad_kdes(self.sample_budget)
-        i = np.random.choice(len(kdes), p=self._weights/np.sum(self._weights))
+        i = np.random.choice(len(kdes), p=self._weights)
         metalearning_kde = namedtuple("metalearning_kde", ["bw", "data", "pdf"])
         return metalearning_kde(
             bw=make_bw_compatible(kdes[i].bw, self.get_kde_configspaces()[i], self._current_config_space),
@@ -123,9 +120,8 @@ class WarmstartedModel():
         self._current_config_space_imputer = None
         self._current_good_kdes = dict()
         self._current_bad_kdes = dict()
-        self._weights = np.array([1] * len(self._good_kdes))
+        self._weights = None
         self._weight_history = dict()
-        self._weight_history["SUM_OF_WEIGHTS"] = list()
 
 class WarmstartedModelBuilder():
     def __init__(self):
