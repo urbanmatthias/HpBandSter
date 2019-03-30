@@ -12,8 +12,9 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         self.warmstarted_model.clean()
         self.observations = dict()
         self.weights = None
-        self.learning_rate = 1
-        self.num_steps = 1
+        self.learning_rate = 0.001
+        self.num_steps = 1000
+        self.penalty_multiplier = 100
         # self.num_nonzero_weight = False
         self.num_nonzero_weight = 15
 
@@ -86,17 +87,17 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         elif len(kdes_good) != self.weights.shape[0]:
             self.weights = np.sum(self._get_likelihood_matrix(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces), axis=0)
         else:
+            matrix = self._get_likelihood_matrix(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces)
             for i in range(self.num_steps):
-                gradient = self._get_weight_gradient(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces)
+                gradient = self._get_weight_gradient(matrix) - self.penalty_multiplier * (np.sum(self.weights) - 1) * self.weights
                 self.weights = self.weights + gradient * self.learning_rate
-                self.weights = np.maximum(self.weights, 0)
-                self.weights = self.weights / np.sum(self.weights)
+                # self.weights = np.maximum(self.weights, 0)
+                # self.weights = self.weights / np.sum(self.weights)
         self.weights = np.maximum(self.weights, 0)
         self.weights = self.weights / np.sum(self.weights)
         self._set_weights(len(kdes_good))
 
-    def _get_weight_gradient(self, train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces):
-        matrix = self._get_likelihood_matrix(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces)
+    def _get_weight_gradient(self, matrix):
         sum_over_models = np.sum(matrix, axis=1).reshape((-1, 1))
         gradient = np.sum(matrix / sum_over_models, axis=0)
         return gradient
