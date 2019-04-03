@@ -82,15 +82,14 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         self._update_weights(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces)
     
     def _update_weights(self, train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces):
+        # self.weights = np.sum(self._get_likelihood_matrix(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces), axis=0)
         if self.weights is None or train_data_good.shape[0] + train_data_bad.shape[0] == 0:
             self.weights = np.ones(len(kdes_good))
-        elif len(kdes_good) != self.weights.shape[0]:
-            self.weights = np.sum(self._get_likelihood_matrix(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces), axis=0)
         else:
-            self.weights = np.random.rand(*self.weights.shape)
+            self.weights = np.random.rand(len(kdes_good))
             self.weights = self.weights / np.sum(self.weights)
             matrix = self._get_likelihood_matrix(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces)
-            for i in range(self.num_steps):
+            for _ in range(self.num_steps):
                 gradient = self._get_weight_gradient(matrix) - self.penalty_multiplier * (np.sum(self.weights) - 1) * self.weights
                 self.weights = self.weights + gradient * self.learning_rate
                 # self.weights = np.maximum(self.weights, 0)
