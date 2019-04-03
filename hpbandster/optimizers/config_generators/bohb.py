@@ -264,7 +264,7 @@ class BOHB(base_config_generator):
 			return_array[i,:] = datum
 		return(return_array)
 
-	def new_result(self, job, update_model=True):
+	def new_result(self, job, update_model=True, force_model_update=False):
 		"""
 			function to register finished runs
 
@@ -281,6 +281,7 @@ class BOHB(base_config_generator):
 		"""
 
 		super().new_result(job)
+		assert update_model or not force_model_update
 
 		if job.result is None:
 			# One could skip crashed results, but we decided to
@@ -303,7 +304,7 @@ class BOHB(base_config_generator):
 		self.losses[budget].append(loss)
 
 		# skip model building if we already have a bigger model
-		if max(list(self.kde_models.keys()) + [-np.inf]) > budget:
+		if max(list(self.kde_models.keys()) + [-np.inf]) > budget and not force_model_update:
 			return
 
 		

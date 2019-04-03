@@ -19,7 +19,7 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         self.num_nonzero_weight = 15
 
     def new_result(self, job, *args, **kwargs):
-        super().new_result(job, *args, **kwargs)
+        super().new_result(job, update_model=True, force_model_update=(self.warmstarted_model.choose_similarity_budget_strategy == "current"))
 
         budget = job.kwargs["budget"]
         config = ConfigSpace.Configuration(configuration_space=self.configspace, values=job.kwargs["config"])
@@ -87,6 +87,8 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         elif len(kdes_good) != self.weights.shape[0]:
             self.weights = np.sum(self._get_likelihood_matrix(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces), axis=0)
         else:
+            self.weights = np.random.rand(*self.weights.shape)
+            self.weights = self.weights / np.sum(self.weights)
             matrix = self._get_likelihood_matrix(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces)
             for i in range(self.num_steps):
                 gradient = self._get_weight_gradient(matrix) - self.penalty_multiplier * (np.sum(self.weights) - 1) * self.weights
