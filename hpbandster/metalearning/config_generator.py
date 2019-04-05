@@ -15,8 +15,6 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         self.learning_rate = 0.001
         self.num_steps = 1000
         self.penalty_multiplier = 100
-        # self.num_nonzero_weight = False
-        self.num_nonzero_weight = 15
 
     def new_result(self, job, *args, **kwargs):
         super().new_result(job, update_model=True, force_model_update=(self.warmstarted_model.choose_similarity_budget_strategy == "current"))
@@ -82,21 +80,33 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         self._update_weights(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces)
     
     def _update_weights(self, train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces):
-        # self.weights = np.sum(self._get_likelihood_matrix(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces), axis=0)
+        # no data to set weight 
         if self.weights is None or train_data_good.shape[0] + train_data_bad.shape[0] == 0:
             self.weights = np.ones(len(kdes_good))
-        else:
+
+        # maximize likelihood of ensemble to set the weights
+        elif self.warmstarted_model.weight_type == "max_likelihood":
             self.weights = np.random.rand(len(kdes_good))
             self.weights = self.weights / np.sum(self.weights)
             matrix = self._get_likelihood_matrix(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces)
             for _ in range(self.num_steps):
                 gradient = self._get_weight_gradient(matrix) - self.penalty_multiplier * (np.sum(self.weights) - 1) * self.weights
                 self.weights = self.weights + gradient * self.learning_rate
-                # self.weights = np.maximum(self.weights, 0)
-                # self.weights = self.weights / np.sum(self.weights)
-        self.weights = np.maximum(self.weights, 0)
-        self.weights = self.weights / np.sum(self.weights)
-        self._set_weights(len(kdes_good))
+        
+        # use the sum of the likelihood over the observations as weight
+        elif self.warmstarted_model.weight_type == "likelihood_sum":
+            self.weights = np.sum(self._get_likelihood_matrix(
+                train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces), axis=0)
+
+        # use the likelihood or log_likelihood as weight
+        elif self.warmstarted_model.weight_type in ["likelihood", "log_likelihood"]:
+            self.weights = np.sum(np.log(np.maximum(1e-32, self._get_likelihood_matrix(
+                train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces))), axis=0)
+            if self.warmstarted_model.weight_type == "likelihood":
+                self.weights = np.exp(self.weights - np.max(self.weights))  # subtract maximum for numerical reasons
+            else:
+                self.weights = self.weights - np.min(self.weights)  # make sure all weights are > 0
+        self.warmstarted_model.update_weights(self.weights)
 
     def _get_weight_gradient(self, matrix):
         sum_over_models = np.sum(matrix, axis=1).reshape((-1, 1))
@@ -121,21 +131,6 @@ class MetaLearningBOHBConfigGenerator(BOHB):
             bad_kde_likelihoods = np.nan_to_num(pdf(bad_kde, train_data_bad_compatible))
             likelihood_matrix[:, i] = np.append(good_kde_likelihoods, bad_kde_likelihoods)
         return likelihood_matrix
-
-    def _set_weights(self, num_kdes):
-        weights = self.weights
-        # if all weights are zero, all models are equally likely
-        if np.sum(weights) == 0 and (not self.num_nonzero_weight or num_kdes < self.num_nonzero_weight):
-            weights = np.ones(num_kdes)
-        # only num_nonzero_weight should have positive weight
-        elif np.sum(weights) == 0:
-            weights = np.zeros(num_kdes)
-            weights[np.random.choice(np.array(list(range(num_kdes))), size=self.num_nonzero_weight, replace=False)] = 1
-        elif self.num_nonzero_weight:
-            weights[np.argsort(weights)[:-self.num_nonzero_weight]] = 0
-        
-        weights = weights / np.sum(weights)
-        self.warmstarted_model.update_weights(weights)
 
 
 # def leave_given_out_pdf(kde, data_predict):

@@ -19,9 +19,12 @@ class WarmstartedModel():
         self._current_bad_kdes = dict()
         self._weights = None
         self._weight_history = dict()
+        self.num_nonzero_weight = 0
         self.sample_budget = None
         self.choose_sample_budget_strategy = "max_available"  # alternative: current
         self.choose_similarity_budget_strategy = "max_with_model"  # alternative: current
+        self.weight_type = "max_likelihood"  # alternatives: likelihood likelihood_sum log_likelihood
+        self.average_type = "weighted_arithmetic_mean"  # alternatives: weighted_geometric_mean
     
     def get_max_budget(self):
         return max(self._good_kdes[0].keys())
@@ -56,15 +59,29 @@ class WarmstartedModel():
         return i >= len(self._good_kdes)
     
     def update_weights(self, weights):
-        assert np.all(weights >= 0)
-        assert np.isclose(np.sum(weights), 1)
-        assert len(weights) == len(self.get_good_kdes(self.sample_budget))
+        # prepare
+        weights = np.maximum(np.copy(weights), 0)
+        num_kdes =  len(self.get_good_kdes(self.sample_budget))
 
-        self._weights = weights  
+        # set all but self.num_nonzero_weights to zero
+        if np.sum(weights) == 0 and (not self.num_nonzero_weight or num_kdes < self.num_nonzero_weight):
+            weights = np.ones(num_kdes)
+        # only num_nonzero_weight should have positive weight
+        elif np.sum(weights) == 0:
+            weights = np.zeros(num_kdes)
+            weights[np.random.choice(np.array(
+                list(range(num_kdes))), size=self.num_nonzero_weight, replace=False)] = 1
+        elif self.num_nonzero_weight:
+            weights[np.argsort(weights)[:-self.num_nonzero_weight]] = 0
+        
+        # set the weights
+        self._weights = weights / np.sum(weights)
+
+        # update weight history
         for i, origin in enumerate(self.get_origins()):
             if origin not in self._weight_history:
                 self._weight_history[origin] = list()
-            self._weight_history[origin].append(weights[i])
+            self._weight_history[origin].append(self._weights[i])
     
     def print_weight_history(self, file=sys.stdout):
         for origin, history in self._weight_history.items():
@@ -101,6 +118,8 @@ class WarmstartedModel():
                 pdf_values[i] = max(0, pdf_value)
         
         # weighting of pdf values
+        if self.average_type == "weighted_geometric_mean":
+            return np.exp(np.sum(self._weights * np.log(pdf_values)))
         return np.sum(pdf_values * self._weights)
 
     def __getitem__(self, good_or_bad):
