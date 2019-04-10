@@ -99,10 +99,10 @@ class MetaLearningBOHBConfigGenerator(BOHB):
                 train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces), axis=0)
 
         # use the likelihood or log_likelihood as weight
-        elif self.warmstarted_model.weight_type in ["likelihood", "log_likelihood"]:
+        elif self.warmstarted_model.weight_type in ["likelihood", "log_likelihood", "leave_out_likelihood"]:
             self.weights = np.sum(np.log(np.maximum(1e-32, self._get_likelihood_matrix(
                 train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces))), axis=0)
-            if self.warmstarted_model.weight_type == "likelihood":
+            if self.warmstarted_model.weight_type in ["likelihood", "leave_out_likelihood"]:
                 self.weights = np.exp(self.weights - np.max(self.weights))  # subtract maximum for numerical reasons
             else:
                 self.weights = self.weights - np.min(self.weights)  # make sure all weights are > 0
@@ -120,7 +120,7 @@ class MetaLearningBOHBConfigGenerator(BOHB):
             train_data_bad_compatible = train_data_bad
 
             # compute likelihood of kde given observation
-            pdf = KDEMultivariate.pdf # leave_given_out_pdf
+            pdf = KDEMultivariate.pdf if self.warmstarted_model.weight_type != "leave_out_likelihood" else leave_given_out_pdf
             if not self.warmstarted_model.is_current_kde(i):
                 imputer = BOHB(kde_configspace).impute_conditional_data
                 train_data_good_compatible = make_vector_compatible(train_data_good, self.configspace, kde_configspace, imputer)
@@ -133,19 +133,19 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         return likelihood_matrix
 
 
-# def leave_given_out_pdf(kde, data_predict):
-#     data_predict = _adjust_shape(data_predict, kde.k_vars)
+def leave_given_out_pdf(kde, data_predict):
+    data_predict = _adjust_shape(data_predict, kde.k_vars)
 
-#     pdf_est = []
-#     for i in range(np.shape(data_predict)[0]):
-#         data = kde.data[np.sum(np.abs(kde.data - data_predict[i, :]), axis=1) != 0]
+    pdf_est = []
+    for i in range(np.shape(data_predict)[0]):
+        data = kde.data[np.sum(np.abs(kde.data - data_predict[i, :]), axis=1) != 0]
 
-#         pdf_est.append(gpke(kde.bw, data=data,
-#                             data_predict=data_predict[i, :],
-#                             var_type=kde.var_type) / kde.nobs)
+        pdf_est.append(gpke(kde.bw, data=data,
+                            data_predict=data_predict[i, :],
+                            var_type=kde.var_type) / kde.nobs)
 
-#     pdf_est = np.squeeze(pdf_est)
-#     return pdf_est
+    pdf_est = np.squeeze(pdf_est)
+    return pdf_est
 
 
 class FilterObservations():

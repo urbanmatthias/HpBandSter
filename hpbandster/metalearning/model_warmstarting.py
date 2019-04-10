@@ -22,8 +22,8 @@ class WarmstartedModel():
         self.num_nonzero_weight = 0
         self.sample_budget = None
         self.choose_sample_budget_strategy = "max_available"  # alternative: current
-        self.choose_similarity_budget_strategy = "max_with_model"  # alternative: current
-        self.weight_type = "max_likelihood"  # alternatives: likelihood likelihood_sum log_likelihood
+        self.choose_similarity_budget_strategy = "current"  # alternative: max_with_model
+        self.weight_type = "likelihood"  # alternatives: likelihood likelihood_sum log_likelihood
         self.average_type = "weighted_arithmetic_mean"  # alternatives: weighted_geometric_mean
     
     def get_max_budget(self):
