@@ -18,7 +18,7 @@ class WarmstartedModel():
         self._current_good_kdes = dict()
         self._current_bad_kdes = dict()
         self._weights = None
-        self._weight_history = dict()
+        self._weight_history = {"ADDITIONAL_INFO": list()}
         self.num_nonzero_weight = 0
         self.sample_budget = None
         self.choose_sample_budget_strategy = "max_available"  # alternative: current
@@ -58,7 +58,7 @@ class WarmstartedModel():
     def is_current_kde(self, i):
         return i >= len(self._good_kdes)
     
-    def update_weights(self, weights):
+    def update_weights(self, weights, **additional_info):
         # prepare
         weights = np.maximum(np.copy(weights), 0)
         num_kdes =  len(self.get_good_kdes(self.sample_budget))
@@ -78,6 +78,7 @@ class WarmstartedModel():
         self._weights = weights / np.sum(weights)
 
         # update weight history
+        self._weight_history["ADDITIONAL_INFO"].append(additional_info)
         for i, origin in enumerate(self.get_origins()):
             if origin not in self._weight_history:
                 self._weight_history[origin] = list()
@@ -85,14 +86,24 @@ class WarmstartedModel():
     
     def print_weight_history(self, file=sys.stdout):
         for origin, history in self._weight_history.items():
-            if origin == "current":
+            if origin in ["current", "ADDITIONAL_INFO"]:
                 continue
             len_history = len(history)
-            history = np.array(history)
             print(origin, "\t", ", ".join(map(str, history)), file=file)
 
         history = np.array(([0] * (len_history - len(self._weight_history["current"]))) + self._weight_history["current"])
         print("current", "\t", ", ".join(map(str, history)), file=file)
+
+        additional_info_keys = set([k for x in self._weight_history["ADDITIONAL_INFO"] for k in x.keys()])
+        additional_info_histories = {k: list() for k in additional_info_keys}
+        for info in self._weight_history["ADDITIONAL_INFO"]:
+            for key in additional_info_keys:
+                additional_info_histories[key].append(info[key] if key in info else float("nan"))
+        
+        for origin, history in additional_info_histories.items():
+            print(origin, "\t", ", ".join(map(str, history)), file=file)
+
+
     
     def set_current_config_space(self, current_config_space, config_generator):
         self._current_config_space = current_config_space
@@ -108,7 +119,7 @@ class WarmstartedModel():
         for i, (kde, kde_config_space) in enumerate(zip(kdes, self.get_kde_configspaces())):
             
             # only query those with positive weight
-            if self._weights[i] <= 0:
+            if np.isclose(self._weights[i], 0):
                 continue
 
             # query KDE
@@ -140,7 +151,7 @@ class WarmstartedModel():
         self._current_good_kdes = dict()
         self._current_bad_kdes = dict()
         self._weights = None
-        self._weight_history = dict()
+        self._weight_history = {"ADDITIONAL_INFO": list()}
 
 class WarmstartedModelBuilder():
     def __init__(self):

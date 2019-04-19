@@ -12,9 +12,8 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         self.warmstarted_model.clean()
         self.observations = dict()
         self.weights = None
-        self.learning_rate = 0.001
+        self.learning_rate = 0.01
         self.num_steps = 1000
-        self.penalty_multiplier = 100
 
     def new_result(self, job, *args, **kwargs):
         super().new_result(job, update_model=True, force_model_update=(self.warmstarted_model.choose_similarity_budget_strategy == "current"))
@@ -77,36 +76,43 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         train_data_good = self.impute_conditional_data(train_configs[idx[:n_good]])
         train_data_bad  = self.impute_conditional_data(train_configs[idx[n_good:n_good+n_bad]])
 
-        self._update_weights(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces)
+        self._update_weights(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces, select_kde_budget)
     
-    def _update_weights(self, train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces):
+    def _update_weights(self, train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces, select_kde_budget):
         # no data to set weight 
         if self.weights is None or train_data_good.shape[0] + train_data_bad.shape[0] == 0:
             self.weights = np.ones(len(kdes_good))
 
         # maximize likelihood of ensemble to set the weights
         elif self.warmstarted_model.weight_type == "max_likelihood":
-            self.weights = np.random.rand(len(kdes_good))
-            self.weights = self.weights / np.sum(self.weights)
+            self.weights = np.zeros(len(kdes_good))
+            self.weights[np.random.choice(len(kdes_good))] = 1
             matrix = self._get_likelihood_matrix(train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces)
             for _ in range(self.num_steps):
-                gradient = self._get_weight_gradient(matrix) - self.penalty_multiplier * (np.sum(self.weights) - 1) * self.weights
+                gradient = self._get_weight_gradient(matrix)
                 self.weights = self.weights + gradient * self.learning_rate
-        
-        # use the sum of the likelihood over the observations as weight
-        elif self.warmstarted_model.weight_type == "likelihood_sum":
-            self.weights = np.sum(self._get_likelihood_matrix(
-                train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces), axis=0)
+
+                # project back in allowed weight space
+                sorted_indices = np.argsort(self.weights)
+                weight_sum = np.sum(self.weights)
+                for i in range(sorted_indices.shape[0]):
+                    num_pos = sorted_indices.shape[0] - i
+                    reduce = self.weights[sorted_indices[i]]
+                    if weight_sum - reduce * num_pos <= 1:
+                        self.weights += (1 - weight_sum) / self.weights.shape[0]
+                        break
+                    weight_sum -= reduce * num_pos
+                    self.weights[sorted_indices[i:]] -= reduce
 
         # use the likelihood or log_likelihood as weight
-        elif self.warmstarted_model.weight_type in ["likelihood", "log_likelihood", "leave_out_likelihood"]:
+        elif self.warmstarted_model.weight_type == "likelihood":
             self.weights = np.sum(np.log(np.maximum(1e-32, self._get_likelihood_matrix(
                 train_data_good, train_data_bad, kdes_good, kdes_bad, kde_configspaces))), axis=0)
-            if self.warmstarted_model.weight_type in ["likelihood", "leave_out_likelihood"]:
-                self.weights = np.exp(self.weights - np.max(self.weights))  # subtract maximum for numerical reasons
-            else:
-                self.weights = self.weights - np.min(self.weights)  # make sure all weights are > 0
-        self.warmstarted_model.update_weights(self.weights)
+            self.weights = np.exp(self.weights - np.max(self.weights))  # subtract maximum for numerical reasons
+          
+        self.warmstarted_model.update_weights(self.weights, 
+                                              similarity_budget=select_kde_budget,
+                                              num_observation=train_data_good.shape[0] + train_data_bad.shape[0])
 
     def _get_weight_gradient(self, matrix):
         sum_over_models = np.sum(matrix, axis=1).reshape((-1, 1))
