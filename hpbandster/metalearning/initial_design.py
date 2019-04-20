@@ -118,7 +118,7 @@ class Hydra():
             initial_design.append(new_incumbent)
             print("Initial Design:", list(map(lambda x: self.origins[x], initial_design)), "Cost:", cost, end="\r")
             if cost <= convergence_threshold:
-                print("\nCost lower than given threshold: Coverged.")
+                print("\nCost lower than given threshold: Converged.")
                 break
             if self.get_total_budget(len(initial_design), num_max_budget, num_sh_iter) > max_total_budget:
                 print("\nTotal budget of initial design larger than given threshold: Failed.")

@@ -126,7 +126,7 @@ class MetaLearningBOHBConfigGenerator(BOHB):
             train_data_bad_compatible = train_data_bad
 
             # compute likelihood of kde given observation
-            pdf = KDEMultivariate.pdf if self.warmstarted_model.weight_type != "leave_out_likelihood" else leave_given_out_pdf
+            pdf = leave_given_out_pdf
             if not self.warmstarted_model.is_current_kde(i):
                 imputer = BOHB(kde_configspace).impute_conditional_data
                 train_data_good_compatible = make_vector_compatible(train_data_good, self.configspace, kde_configspace, imputer)
