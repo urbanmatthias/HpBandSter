@@ -83,26 +83,28 @@ class Hydra():
             dataset_id = origin_to_id[l["dataset_origin"]]
             self.loss_matrices[l["budget"]][incumbent_id, dataset_id] = l["loss"]
     
-    def learn(self, convergence_threshold, max_total_budget, max_initial_design_size=float("inf")):
+    def learn(self, convergence_threshold, max_total_budget, max_initial_design_size=float("inf"), force_num_sh_iter=0):
         largest_budget = max(self.loss_matrices.keys())
         max_num_max_budget = int(max_total_budget // largest_budget)
         max_num_sh_iter = len(self.loss_matrices)
         initial_designs = list()
         costs = list()
 
-        print("Try single SH-iter")
-        r = self._learn(convergence_threshold, max_total_budget, num_max_budget=max_num_max_budget, num_sh_iter=1, max_size=max_initial_design_size)
+        print("Try single SH-iter" if not force_num_sh_iter else "Using %s SH-iterations" % force_num_sh_iter)
+        r = self._learn(convergence_threshold, max_total_budget, num_max_budget=max_num_max_budget,
+                        num_sh_iter=force_num_sh_iter or 1, max_size=max_initial_design_size)
         if r is not None:
             initial_designs.append(r[0])
             costs.append(r[1])
 
-        for num_sh_iter in range(2, max_num_sh_iter + 1):
-            for num_max_budget in range(1, max_num_max_budget + 1):
-                print("Try %s SH iterations with %s configurations evaluated at max budget" % (num_sh_iter, num_max_budget))
-                r = self._learn(convergence_threshold, max_total_budget, num_max_budget=num_max_budget, num_sh_iter=num_sh_iter, max_size=max_initial_design_size)
-                if r is not None:
-                    initial_designs.append(r[0])
-                    costs.append(r[1])
+        if not force_num_sh_iter:
+            for num_sh_iter in range(2, max_num_sh_iter + 1):
+                for num_max_budget in range(1, max_num_max_budget + 1):
+                    print("Try %s SH iterations with %s configurations evaluated at max budget" % (num_sh_iter, num_max_budget))
+                    r = self._learn(convergence_threshold, max_total_budget, num_max_budget=num_max_budget, num_sh_iter=num_sh_iter, max_size=max_initial_design_size)
+                    if r is not None:
+                        initial_designs.append(r[0])
+                        costs.append(r[1])
         try:
             idx = np.argmin([x.get_total_budget() for x in initial_designs])  # return initial design with lowest total budget
             # idx = np.argmin(costs)  # return initial design with lowest cost
@@ -146,7 +148,8 @@ class Hydra():
         budgets = self.get_budgets(num_sh_iter)
         return sum(map(lambda x: x[0] * x[1], zip(budgets, ns)))
     
-    def get_num_configs_per_sh_iter(self, num_min_budget, num_max_budget, num_sh_iter):
+    @staticmethod
+    def get_num_configs_per_sh_iter(num_min_budget, num_max_budget, num_sh_iter):
         if num_sh_iter <= 1:
             return [num_min_budget]
         num_max_budget = min(num_min_budget, num_max_budget)
