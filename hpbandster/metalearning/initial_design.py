@@ -9,6 +9,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.base import clone
 import traceback
+from copy import copy
 
 class InitialDesign():
     def __init__(self, configs, origins, num_configs_per_sh_iter, budgets):
@@ -59,6 +60,20 @@ def normalized_distance_to_min(x):
     result[~np.isfinite(result)] = 2
     return result
 
+def no_normalization(x):
+    if not np.any(np.isfinite(x)):
+        return np.zeros_like(x)
+    maximum = np.max(x[np.isfinite(x)])
+    minimum = np.min(x[np.isfinite(x)])
+    result = x
+    result[~np.isfinite(result)] = maximum + (maximum - minimum)
+    return result
+
+normalize_strategies = {
+    "rank": rank,
+    "normalized_distance_to_min": normalized_distance_to_min,
+    "no_normalization": no_normalization
+}
 
 class Hydra():
     def __init__(self, normalize_loss=normalized_distance_to_min, bigger_is_better=True):
@@ -83,31 +98,32 @@ class Hydra():
             dataset_id = origin_to_id[l["dataset_origin"]]
             self.loss_matrices[l["budget"]][incumbent_id, dataset_id] = l["loss"]
     
-    def learn(self, convergence_threshold, max_total_budget, max_initial_design_size=float("inf"), force_num_sh_iter=0):
+    def learn(self, convergence_threshold, max_total_budget, max_initial_design_size=float("inf"),
+            force_num_sh_iter=0, force_num_max_budget=0):
         largest_budget = max(self.loss_matrices.keys())
         max_num_max_budget = int(max_total_budget // largest_budget)
         max_num_sh_iter = len(self.loss_matrices)
         initial_designs = list()
         costs = list()
 
-        print("Try single SH-iter" if not force_num_sh_iter else "Using %s SH-iterations" % force_num_sh_iter)
-        r = self._learn(convergence_threshold, max_total_budget, num_max_budget=max_num_max_budget,
-                        num_sh_iter=force_num_sh_iter or 1, max_size=max_initial_design_size)
-        if r is not None:
-            initial_designs.append(r[0])
-            costs.append(r[1])
-
-        if not force_num_sh_iter:
-            for num_sh_iter in range(2, max_num_sh_iter + 1):
-                for num_max_budget in range(1, max_num_max_budget + 1):
-                    print("Try %s SH iterations with %s configurations evaluated at max budget" % (num_sh_iter, num_max_budget))
-                    r = self._learn(convergence_threshold, max_total_budget, num_max_budget=num_max_budget, num_sh_iter=num_sh_iter, max_size=max_initial_design_size)
-                    if r is not None:
-                        initial_designs.append(r[0])
-                        costs.append(r[1])
+        num_sh_iter_range = [force_num_sh_iter] if force_num_sh_iter else range(1, max_num_sh_iter + 1)
+        for num_sh_iter in num_sh_iter_range:
+            num_max_budget_range = [force_num_max_budget] if force_num_max_budget else (
+                [max_num_max_budget] if num_sh_iter == 1 else range(1, max_num_max_budget + 1)
+            )
+            for num_max_budget in num_max_budget_range:
+                print("Try %s SH iterations with %s configurations evaluated at max budget" % (num_sh_iter, num_max_budget))
+                r = self._learn(convergence_threshold=convergence_threshold,
+                                max_total_budget=max_total_budget,
+                                num_max_budget=num_max_budget,
+                                num_sh_iter=num_sh_iter,
+                                max_size=max_initial_design_size)
+                if r is not None:
+                    initial_designs.append(r[0])
+                    costs.append(r[1])
         try:
-            idx = np.argmin([x.get_total_budget() for x in initial_designs])  # return initial design with lowest total budget
-            # idx = np.argmin(costs)  # return initial design with lowest cost
+            # idx = np.argmin([x.get_total_budget() for x in initial_designs])  # return initial design with lowest total budget
+            idx = np.argmin(costs)  # return initial design with lowest cost
             return initial_designs[idx], costs[idx]
         except:
             return None, None
@@ -115,21 +131,38 @@ class Hydra():
     def _learn(self, convergence_threshold, max_total_budget, num_max_budget, num_sh_iter, max_size):
         initial_design = []
         cost = float("inf")
+        best_initial_design = None
+        best_cost = float("inf")
         for _ in range(len(self.incumbents)):
+
+            # single step
             new_incumbent, cost = self._greedy_step(initial_design, num_max_budget, num_sh_iter)
             initial_design.append(new_incumbent)
+            total_budget = self.get_total_budget(len(initial_design), num_max_budget, num_sh_iter)
             print("Initial Design:", list(map(lambda x: self.origins[x], initial_design)), "Cost:", cost, end="\r")
-            if cost <= convergence_threshold:
-                print("\nCost lower than given threshold: Converged.")
+
+            # check if initial design satisfies requirements
+            if total_budget > max_total_budget:
+                print("\nTotal budget of initial design larger than given threshold: Terminating.")
                 break
-            if self.get_total_budget(len(initial_design), num_max_budget, num_sh_iter) > max_total_budget:
-                print("\nTotal budget of initial design larger than given threshold: Failed.")
-                return None
             if len(initial_design) > max_size:
-                print("\nInitial design is larger than given maximum size. Failed")
-                return None
+                print("\nInitial design is larger than given maximum size. Terminating.")
+                break
+
+            # check if new best found
+            if cost <= convergence_threshold and cost < best_cost:
+                print("\nFound new best initial design")
+                best_initial_design = copy(initial_design)
+                best_cost = cost
+            
+            # check termination conditions
+            elif cost <= convergence_threshold:
+                print("Converged.")
+                break
+        
+        initial_design, cost = best_initial_design, best_cost
         if cost > convergence_threshold:
-            print("\nCould not find initial design with cost lower than given threshold")
+            print("\nCould not find initial design with cost lower than given threshold. Failed.")
             return None
 
         initial_design_configs = [self.incumbents[i] for i in initial_design]
@@ -165,6 +198,9 @@ class Hydra():
 
         # return best from available incumbents
         available_incumbents = set(range(len(self.incumbents))) - set(initial_design)
+
+        if not available_incumbents:
+            return None, float("inf")
 
         def cost_of_incumbent(inc):
             return self._cost(initial_design + [inc], num_configs_per_sh_iter)

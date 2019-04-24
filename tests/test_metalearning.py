@@ -129,15 +129,17 @@ class TestMetaLearning(unittest.TestCase):
         self.assertEqual(hydra._greedy_step([0, 2], 1, 3), (3, 0.25))
 
         # test learn
-        initial_design, cost = hydra._learn(convergence_threshold=0.3, max_total_budget=50, num_max_budget=1, num_sh_iter=3, max_size=4)
+        initial_design, cost = hydra._learn(convergence_threshold=0.3, max_total_budget=30, num_max_budget=1, num_sh_iter=3, max_size=4)
         self.assertEqual(initial_design.origins, ["3", "1", "4"])
         self.assertEqual(list(map(lambda x: x.get_dictionary()["A"], initial_design.configs)), [3, 1, 4])
         self.assertEqual(initial_design.num_configs_per_sh_iter, [3, 1, 1])
 
-        initial_design, cost = hydra.learn(convergence_threshold=0.3, max_total_budget=50)
+        initial_design, cost = hydra.learn(convergence_threshold=0.3, max_total_budget=10)
         self.assertEqual(initial_design.origins, ["3", "1", "4"])
         self.assertEqual(list(map(lambda x: x.get_dictionary()["A"], initial_design.configs)), [3, 1, 4])
         self.assertEqual(initial_design.num_configs_per_sh_iter, [3, 1, 1])
+        self.assertEqual(initial_design.budgets, [1, 2, 4])
+        self.assertEqual(initial_design.get_total_budget(), 9)
         loss_matrix_computation.delete_collection("test_loss_matrix", dict())
     
     def test_loss_matrix_computation(self):
