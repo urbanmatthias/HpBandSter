@@ -122,10 +122,13 @@ class Hydra():
                     initial_designs.append(r[0])
                     costs.append(r[1])
         try:
-            # idx = np.argmin([x.get_total_budget() for x in initial_designs])  # return initial design with lowest total budget
-            idx = np.argmin(costs)  # return initial design with lowest cost
+            costs = np.array(costs)
+            min_cost = np.where(costs == costs.min())[0]  # return initial design with lowest cost
+            idx = min(min_cost.tolist(), key=lambda x: initial_designs[x].get_total_budget())
             return initial_designs[idx], costs[idx]
-        except:
+        except Exception as e:
+            traceback.print_exc()
+            print(e)
             return None, None
 
     def _learn(self, convergence_threshold, max_total_budget, num_max_budget, num_sh_iter, max_size):
