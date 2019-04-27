@@ -94,6 +94,8 @@ class Hydra():
         origin_to_id = {origin: i for i, origin in enumerate(self.origins)}
 
         for l in losses:
+            if l["incumbent_origin"] not in origin_to_id or l["dataset_origin"] not in origin_to_id:
+                continue
             incumbent_id = origin_to_id[l["incumbent_origin"]]
             dataset_id = origin_to_id[l["dataset_origin"]]
             self.loss_matrices[l["budget"]][incumbent_id, dataset_id] = l["loss"]
