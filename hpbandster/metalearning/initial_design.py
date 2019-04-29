@@ -144,7 +144,6 @@ class Hydra():
             new_incumbent, cost = self._greedy_step(initial_design, num_max_budget, num_sh_iter)
             initial_design.append(new_incumbent)
             total_budget = self.get_total_budget(len(initial_design), num_max_budget, num_sh_iter)
-            print("Initial Design:", list(map(lambda x: self.origins[x], initial_design)), "Cost:", cost, end="\r")
 
             # check if initial design satisfies requirements
             if total_budget > max_total_budget:
@@ -155,6 +154,7 @@ class Hydra():
                 break
 
             # check if new best found
+            print("Initial Design:", list(map(lambda x: self.origins[x], initial_design)), "Cost:", cost, end="\r")
             if cost <= convergence_threshold and cost < best_cost:
                 print("\nFound new best initial design")
                 best_initial_design = copy(initial_design)
