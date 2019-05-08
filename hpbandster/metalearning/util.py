@@ -36,6 +36,7 @@ def make_bw_compatible(bw, from_configspace, to_configspace):
     return filter_constant(result, to_configspace)
 
 def make_vector_compatible(vector, from_configspace, to_configspace, imputer):
+    vector = np.asanyarray(vector)
     vector = insert_constant(vector, from_configspace)
     x = np.array(vector).reshape((-1, len(from_configspace.get_hyperparameters())))
     c = np.zeros((x.shape[0], len(to_configspace.get_hyperparameters()))) * np.nan
