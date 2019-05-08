@@ -1,5 +1,5 @@
 from hpbandster.optimizers.config_generators.bohb import BOHB
-from hpbandster.metalearning.util import make_vector_compatible
+from hpbandster.metalearning.util import make_vector_compatible, filter_constant
 import ConfigSpace
 import numpy as np
 import math
@@ -65,7 +65,8 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         # read observations and transform to array
         train_configs = list(config_to_loss.keys())
         train_losses = np.array(list(map(lambda c:config_to_loss[c], train_configs)))
-        train_configs = np.array(list(map(ConfigSpace.Configuration.get_array, train_configs)))
+        train_configs = np.array(list(map(
+            lambda x: filter_constant(ConfigSpace.Configuration.get_array(x), self.configspace), train_configs)))
 
         # split into good and bad
         n_good = (self.top_n_percent * train_configs.shape[0]) // 100

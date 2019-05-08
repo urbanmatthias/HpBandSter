@@ -12,6 +12,7 @@ import scipy.optimize as spo
 import statsmodels.api as sm
 
 from hpbandster.core.base_config_generator import base_config_generator
+from hpbandster.metalearning.util import filter_constant, is_constant, num_non_constant_hps, insert_constant
 
 
 class BOHB(base_config_generator):
@@ -53,11 +54,11 @@ class BOHB(base_config_generator):
 
 		self.min_points_in_model = min_points_in_model
 		if min_points_in_model is None:
-			self.min_points_in_model = len(self.configspace.get_hyperparameters())+1
+			self.min_points_in_model = num_non_constant_hps(self.configspace)+1
 		
-		if self.min_points_in_model < len(self.configspace.get_hyperparameters())+1:
+		if self.min_points_in_model < num_non_constant_hps(self.configspace)+1:
 			self.logger.warning('Invalid min_points_in_model value. Setting it to %i'%(len(self.configspace.get_hyperparameters())+1))
-			self.min_points_in_model =len(self.configspace.get_hyperparameters())+1
+			self.min_points_in_model = num_non_constant_hps(self.configspace)+1
 		
 		self.num_samples = num_samples
 		self.random_fraction = random_fraction
@@ -69,6 +70,8 @@ class BOHB(base_config_generator):
 
 
 		for h in hps:
+			if is_constant(h):
+				continue
 			if hasattr(h, 'sequence'):
 				raise RuntimeError('This version on BOHB does not support ordinal hyperparameters. Please encode %s as an integer parameter!'%(h.name))
 			
@@ -189,6 +192,7 @@ class BOHB(base_config_generator):
 					info_dict['model_based_pick']  = False
 				else:
 					self.logger.debug('best_vector: {}, {}, {}, {}'.format(best_vector, best, l(best_vector), g(best_vector)))
+					best_vector = insert_constant(np.array(best_vector), self.configspace)
 					for i, hp_value in enumerate(best_vector):
 						if isinstance(
 							self.configspace.get_hyperparameter(
@@ -300,7 +304,7 @@ class BOHB(base_config_generator):
 
 		# We want to get a numerical representation of the configuration in the original space
 		conf = ConfigSpace.Configuration(self.configspace, job.kwargs["config"])
-		self.configs[budget].append(conf.get_array())
+		self.configs[budget].append(filter_constant(conf.get_array(), self.configspace))
 		self.losses[budget].append(loss)
 
 		# skip model building if we already have a bigger model

@@ -3,7 +3,7 @@ import os
 import ConfigSpace
 import numpy as np
 import shutil
-from hpbandster.metalearning.util import make_config_compatible, make_vector_compatible
+from hpbandster.metalearning.util import make_config_compatible, make_vector_compatible, filter_constant, insert_constant
 from hpbandster.metalearning.initial_design import Hydra, LossMatrixComputation, rank
 from hpbandster.metalearning.model_warmstarting import WarmstartedModelBuilder, WarmstartedModel
 from hpbandster.core.result import logged_results_to_HBS_result
@@ -19,49 +19,54 @@ class TestMetaLearning(unittest.TestCase):
         h3 = ConfigSpace.hyperparameters.UniformIntegerHyperparameter("h3", lower=0, upper=100)
         h4 = ConfigSpace.hyperparameters.UniformIntegerHyperparameter("h4", lower=0, upper=100)
         h5 = ConfigSpace.hyperparameters.UniformIntegerHyperparameter("h5", lower=0, upper=100)
+        c1 = ConfigSpace.hyperparameters.Constant("c1", 42)
+        c2 = ConfigSpace.hyperparameters.CategoricalHyperparameter("c2", ["21"])
+
         cs1 = ConfigSpace.ConfigurationSpace()
-        cs1.add_hyperparameters([h1, h2a, h4, h5])
+        cs1.add_hyperparameters([h1, h2a, c1, h4, h5])
         cs1.add_conditions([
             ConfigSpace.EqualsCondition(h4, parent=h2a, value="B"),
             ConfigSpace.EqualsCondition(h5, parent=h2a, value="C")
         ])
         cs2 = ConfigSpace.ConfigurationSpace()
-        cs2.add_hyperparameters([h2b, h3, h4, h5])
+        cs2.add_hyperparameters([h2b, h3, h4, c2, h5])
         cs2.add_conditions([
             ConfigSpace.EqualsCondition(h3, parent=h2b, value="A"),
             ConfigSpace.EqualsCondition(h4, parent=h2b, value="B"),
             ConfigSpace.EqualsCondition(h5, parent=h2b, value="C"),
         ])
 
-        config = ConfigSpace.Configuration(cs1, {"h1": 0.2, "h2": "B", "h4": 42})
+        config = ConfigSpace.Configuration(cs1, {"h1": 0.2, "h2": "B", "h4": 42, "c1": 42})
         compatible = make_config_compatible(config, cs2)
         self.assertEqual(compatible["h2"], "B")
         self.assertEqual(compatible["h4"], 42)
-        self.assertEqual(len(compatible.get_dictionary()), 2)
+        self.assertEqual(len(compatible.get_dictionary()), 3)
 
-        vector = config.get_array()
+        vector = filter_constant(config.get_array(), cs1)
         imputer = BohbConfigGenerator(cs2).impute_conditional_data
         compatible_vector = make_vector_compatible(vector, cs1, cs2, imputer)
-        compatible_config = ConfigSpace.Configuration(cs2, vector=compatible_vector.reshape((-1, )), allow_inactive_with_values=True)
+        compatible_config = ConfigSpace.Configuration(cs2, vector=insert_constant(compatible_vector.reshape((-1, )), cs2),
+            allow_inactive_with_values=True)
         compatible_config = ConfigSpace.util.deactivate_inactive_hyperparameters(compatible_config, cs2)
         self.assertEqual(compatible, compatible_config)
 
-        config = ConfigSpace.Configuration(cs2, {"h2": "A", "h3": 97})
+        config = ConfigSpace.Configuration(cs2, {"h2": "A", "h3": 97, "c2": "21"})
         compatible = make_config_compatible(config, cs1)
         self.assertTrue("h1" in compatible)
         self.assertTrue(compatible["h2"] in ["B", "C"])
         self.assertTrue("h4" in compatible if compatible["h2"] == "B" else "h5" in compatible)
-        self.assertEqual(len(compatible.get_dictionary()), 3)
+        self.assertEqual(len(compatible.get_dictionary()), 4)
 
-        vector = config.get_array()
+        vector = filter_constant(config.get_array(), cs2)
         imputer = BohbConfigGenerator(cs1).impute_conditional_data
         compatible_vector = make_vector_compatible(vector, cs2, cs1, imputer)
-        compatible_config = ConfigSpace.Configuration(cs1, vector=compatible_vector.reshape((-1, )), allow_inactive_with_values=True)
+        compatible_config = ConfigSpace.Configuration(cs1, vector=insert_constant(compatible_vector.reshape((-1, )), cs1),
+            allow_inactive_with_values=True)
         compatible_config = ConfigSpace.util.deactivate_inactive_hyperparameters(compatible_config, cs1)
         self.assertTrue("h1" in compatible_config)
         self.assertTrue(compatible_config["h2"] in ["B", "C"])
         self.assertTrue("h4" in compatible_config if compatible_config["h2"] == "B" else "h5" in compatible_config)
-        self.assertEqual(len(compatible_config.get_dictionary()), 3)
+        self.assertEqual(len(compatible_config.get_dictionary()), 4)
     
     def test_initial_design(self):
         loss_matrix_computation = LossMatrixComputation()
