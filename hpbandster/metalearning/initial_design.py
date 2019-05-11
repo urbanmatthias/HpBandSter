@@ -48,31 +48,30 @@ class InitialDesign():
         return result, origin
 
 
-def rank(x):
-    return np.argsort(np.argsort(x))
-
-def normalized_distance_to_min(x):
-    if not np.any(np.isfinite(x)):
-        return np.zeros_like(x)
-    maximum = np.max(x[np.isfinite(x)])
-    minimum = np.min(x[np.isfinite(x)])
-    result = (x - minimum) / (maximum - minimum)
-    result[~np.isfinite(result)] = 2
+def normalized_distance_to_min(loss_matrices, dataset):
+    # get minimum and maximum
+    minimum, maximum = None, None
+    for _, loss_matrix in loss_matrices.items():
+        x = loss_matrix[:, dataset]
+        if not np.any(np.isfinite(x)):
+            continue
+        maximum = max(maximum, np.max(x[np.isfinite(x)]))
+        minimum = min(minimum, np.min(x[np.isfinite(x)]))
+    
+    # all runs crashed for that dataset
+    if minimum is None or maximum is None:
+        return {budget: np.zeros_like(loss_matrix) for budget, loss_matrix in loss_matrices.items()}
+    
+    # perform normalization and return result
+    result = dict()
+    for budget, loss_matrix in loss_matrices.items():
+        result[budget] = (loss_matrix[:, dataset] - minimum) / (maximum - minimum)
+        result[budget][~np.isfinite(result[budget])] = 2
     return result
 
-def no_normalization(x):
-    if not np.any(np.isfinite(x)):
-        return np.zeros_like(x)
-    maximum = np.max(x[np.isfinite(x)])
-    minimum = np.min(x[np.isfinite(x)])
-    result = x
-    result[~np.isfinite(result)] = maximum + (maximum - minimum)
-    return result
 
 normalize_strategies = {
-    "rank": rank,
-    "normalized_distance_to_min": normalized_distance_to_min,
-    "no_normalization": no_normalization
+    "normalized_distance_to_min": normalized_distance_to_min
 }
 
 class Hydra():
@@ -227,8 +226,7 @@ class Hydra():
             for i, b in enumerate(budgets):
 
                 # cost in current SH iteration
-                losses = self.loss_matrices[b][:, d]
-                normalized_losses = self.normalize_loss(losses)
+                normalized_losses = self.normalize_loss(self.loss_matrices, d)[b]
 
                 cost = np.min(normalized_losses[current_configs])
                 if not self.bigger_is_better or b == max(budgets):
