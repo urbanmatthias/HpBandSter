@@ -50,7 +50,7 @@ class InitialDesign():
 
 def normalized_distance_to_min(loss_matrices, dataset):
     # get minimum and maximum
-    minimum, maximum = None, None
+    minimum, maximum = float("inf"), -float("inf")
     for _, loss_matrix in loss_matrices.items():
         x = loss_matrix[:, dataset]
         if not np.any(np.isfinite(x)):
@@ -59,7 +59,7 @@ def normalized_distance_to_min(loss_matrices, dataset):
         minimum = min(minimum, np.min(x[np.isfinite(x)]))
     
     # all runs crashed for that dataset
-    if minimum is None or maximum is None:
+    if minimum == float("inf") or maximum == -float("inf"):
         return {budget: np.zeros_like(loss_matrix) for budget, loss_matrix in loss_matrices.items()}
     
     # perform normalization and return result
@@ -234,7 +234,7 @@ class Hydra():
                 
                 # update configs for next SH iteration
                 if b != max(budgets):
-                    ranks = np.argsort(np.argsort(losses[current_configs]))
+                    ranks = np.argsort(np.argsort(normalized_losses[current_configs]))
                     current_configs = current_configs[ranks < num_configs_per_sh_iter[i + 1]]
             
             assert np.isfinite(current_cost)
