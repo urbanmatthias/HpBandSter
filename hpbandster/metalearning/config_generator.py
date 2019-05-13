@@ -127,7 +127,7 @@ class MetaLearningBOHBConfigGenerator(BOHB):
             train_data_bad_compatible = train_data_bad
 
             # compute likelihood of kde given observation
-            pdf = leave_given_out_pdf
+            pdf = KDEMultivariate.pdf  # leave_given_out_pdf
             if not self.warmstarted_model.is_current_kde(i):
                 imputer = BOHB(kde_configspace).impute_conditional_data
                 train_data_good_compatible = make_vector_compatible(train_data_good, self.configspace, kde_configspace, imputer)
@@ -140,19 +140,19 @@ class MetaLearningBOHBConfigGenerator(BOHB):
         return likelihood_matrix
 
 
-def leave_given_out_pdf(kde, data_predict):
-    data_predict = _adjust_shape(data_predict, kde.k_vars)
+# def leave_given_out_pdf(kde, data_predict):
+#     data_predict = _adjust_shape(data_predict, kde.k_vars)
 
-    pdf_est = []
-    for i in range(np.shape(data_predict)[0]):
-        data = kde.data[np.sum(np.abs(kde.data - data_predict[i, :]), axis=1) != 0]
+#     pdf_est = []
+#     for i in range(np.shape(data_predict)[0]):
+#         data = kde.data[np.sum(np.abs(kde.data - data_predict[i, :]), axis=1) != 0]
 
-        pdf_est.append(gpke(kde.bw, data=data,
-                            data_predict=data_predict[i, :],
-                            var_type=kde.var_type) / kde.nobs)
+#         pdf_est.append(gpke(kde.bw, data=data,
+#                             data_predict=data_predict[i, :],
+#                             var_type=kde.var_type) / kde.nobs)
 
-    pdf_est = np.squeeze(pdf_est)
-    return pdf_est
+#     pdf_est = np.squeeze(pdf_est)
+#     return pdf_est
 
 
 class FilterObservations():
